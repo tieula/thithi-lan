@@ -1,0 +1,366 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Học sinh làm bài thi</title>
+
+    <script src="{{ url_for('static', filename='tailwind.js') }}"></script>
+    
+    <script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
+   
+    <script src="{{ url_for('static', filename='sweetalert2.all.min.js') }}"></script>
+
+
+    <style>
+        * { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        .navy-header { background-color: #0b3c6d; }
+        .navy-btn { background-color: #0b3c6d; color: #ffffff; }
+        .navy-btn:hover { background-color: #082d52; }
+
+        /* Đổi màu icon SweetAlert2 sang Navy đồng bộ */
+        .swal2-icon.swal2-success {
+            border-color: #0b3c6d !important;
+        }
+        .swal2-icon.swal2-success .swal2-success-line-tip,
+        .swal2-icon.swal2-success .swal2-success-line-long {
+            background-color: #0b3c6d !important;
+        }
+        .swal2-icon.swal2-success .swal2-success-ring {
+            border-color: rgba(11, 60, 109, 0.3) !important;
+        }
+        .swal2-icon.swal2-info, .swal2-icon.swal2-warning, .swal2-icon.swal2-question {
+            border-color: #0b3c6d !important;
+            color: #0b3c6d !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between antialiased select-none">
+
+    <!-- 1. MÀN HÌNH ĐĂNG NHẬP -->
+    <div id="loginScreen" class="flex-1 flex items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-sm space-y-4">
+            <h2 class="text-xl font-bold text-center text-blue-900 border-b pb-2">ĐĂNG NHẬP CA THI</h2>
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Họ và tên thí sinh:</label>
+                <input type="text" id="studentName" placeholder="Nhập đầy đủ họ và tên..." class="w-full border-2 border-blue-400 p-2.5 rounded focus:outline-none focus:border-blue-700 font-medium">
+            </div>
+            <button onclick="joinExam()" class="w-full navy-btn font-bold py-2.5 rounded shadow transition">
+                Vào phòng thi
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. MÀN HÌNH CHỜ PHÁT ĐỀ -->
+    <div id="waitingScreen" class="hidden flex-1 flex flex-col items-center justify-center p-4 text-center space-y-3">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div>
+        <h3 class="text-lg font-bold text-gray-800">Đã vào phòng chờ thành công!</h3>
+        <p class="text-sm text-gray-600">Vui lòng giữ nguyên màn hình, đề thi sẽ tự động hiển thị khi giáo viên bắt đầu.</p>
+    </div>
+
+    <!-- 3. MÀN HÌNH LÀM BÀI -->
+    <div id="examScreen" class="hidden flex-1 flex flex-col">
+        <!-- HEADER CỐ ĐỊNH: ĐỒNG HỒ ĐẾM NGƯỢC (PHÚT : GIÂY) -->
+        <header class="navy-header text-white px-4 py-3 sticky top-0 z-30 shadow flex justify-between items-center">
+            <div>
+                <span class="text-xs text-gray-300 block">Thí sinh:</span>
+                <span id="headerStudentName" class="font-bold text-sm">...</span>
+            </div>
+            <div class="text-right">
+                <span class="text-xs text-gray-300 block">Thời gian còn lại:</span>
+                <span id="countdownTimer" class="font-mono text-xl font-black text-yellow-300 tracking-wider">15:00</span>
+            </div>
+        </header>
+
+        <!-- KHUNG DANH SÁCH CÂU HỎI -->
+        <main class="flex-1 max-w-2xl w-full mx-auto p-4 space-y-6 pb-24" id="questionsContainer">
+            <!-- Render câu hỏi động qua JS -->
+        </main>
+
+        <!-- FOOTER NỘP BÀI -->
+        <footer class="fixed bottom-0 left-0 right-0 bg-white border-t p-3 shadow-lg flex justify-center z-30">
+            <button id="btnSubmit" onclick="confirmSubmit()" class="w-full max-w-md bg-green-700 hover:bg-green-800 text-white font-bold py-3 rounded-lg text-base shadow transition">
+                Nộp bài thi
+            </button>
+        </footer>
+    </div>
+
+    <script>
+        const socket = io();
+        let studentAnswers = {};
+        let timerInterval = null;
+        let timeLeft = 0;
+        let isSubmitted = false;
+        let isExamActive = false;
+
+        function joinExam() {
+            const name = document.getElementById('studentName').value.trim();
+            if (!name) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Lỗi',
+                    text: 'Vui lòng nhập họ và tên của bạn!',
+                    confirmButtonColor: '#0b3c6d',
+                    confirmButtonText: 'Đóng'
+                });
+                return;
+            }
+            document.getElementById('headerStudentName').innerText = name;
+            socket.emit('join_student', { name: name });
+
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('waitingScreen').classList.remove('hidden');
+        }
+
+        // Chặn thi lần 2 khi nhận tín hiệu từ Server
+        socket.on('exam_blocked', (data) => {
+            Swal.fire({
+                icon: 'warning',
+                title: 'THÔNG BÁO',
+                text: data.message || 'Bạn đã thi rồi!',
+                confirmButtonColor: '#0b3c6d',
+                confirmButtonText: 'Đã hiểu',
+                allowOutsideClick: false
+            }).then(() => {
+                document.body.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+                        <div class="bg-white p-6 rounded shadow-md text-center max-w-sm">
+                            <h2 class="text-xl font-bold text-red-600 mb-2">BẠN ĐÃ THI RỒI!</h2>
+                            <p class="text-gray-600 text-sm">Thiết bị này đã hoàn thành bài thi trong ca hiện tại.</p>
+                        </div>
+                    </div>
+                `;
+            });
+        });
+
+        // Nhận đề thi (áp dụng cho cả thí sinh vào trước và vào sau)
+        socket.on('start_exam_now', (payload) => {
+            if (isSubmitted) return;
+            isExamActive = true;
+
+            document.getElementById('waitingScreen').classList.add('hidden');
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('examScreen').classList.remove('hidden');
+
+            renderQuestions(payload.mcq, payload.tf);
+
+            timeLeft = payload.time_left !== undefined ? payload.time_left : (payload.duration * 60);
+            startCountdown();
+        });
+
+        // Hàm làm sạch chuỗi câu hỏi, loại bỏ chữ "Câu X:" cũ để đánh số thứ tự mới
+        function cleanQuestionTitle(text) {
+            if (!text) return "";
+            return text.replace(/^(câu\s*\d+[\s\:\.\-\)]*)\s*/i, '').trim();
+        }
+
+        function renderQuestions(mcqs, tfs) {
+            const container = document.getElementById('questionsContainer');
+            container.innerHTML = '';
+
+            // 1. Render Phần 1: MCQ
+            if (mcqs && mcqs.length > 0) {
+                const header1 = document.createElement('div');
+                header1.className = "font-bold text-sm text-blue-900 border-b-2 border-blue-900 pb-1";
+                header1.innerText = "PHẦN 1: CÂU HỎI TRẮC NGHIỆM NHIỀU LỰA CHỌN";
+                container.appendChild(header1);
+
+                mcqs.forEach((q, idx) => {
+                    const card = document.createElement('div');
+                    card.className = "bg-white p-4 rounded-lg shadow-sm border border-gray-200 space-y-3";
+
+                    // Đánh số thứ tự liên tục 1, 2, 3...
+                    const cleanText = cleanQuestionTitle(q.question);
+                    const qText = `Câu ${idx + 1}: ${cleanText}`;
+                    card.innerHTML = `<div class="font-semibold text-gray-900">${qText}</div>`;
+
+                    const optsDiv = document.createElement('div');
+                    optsDiv.className = "space-y-2";
+                    q.options.forEach(opt => {
+                        optsDiv.innerHTML += `
+                            <label class="flex items-center space-x-3 p-2 rounded hover:bg-gray-50 border cursor-pointer">
+                                <input type="radio" name="mcq_${q.id}" value="${opt.key}" onchange="selectMcq(${q.id}, '${opt.key}')" class="h-4 w-4 text-blue-600">
+                                <span class="text-sm font-medium"><b>${opt.key}.</b> ${opt.text}</span>
+                            </label>
+                        `;
+                    });
+                    card.appendChild(optsDiv);
+                    container.appendChild(card);
+                });
+            }
+
+            // 2. Render Phần 2: True/False
+            if (tfs && tfs.length > 0) {
+                const header2 = document.createElement('div');
+                header2.className = "font-bold text-sm text-blue-900 border-b-2 border-blue-900 pb-1 mt-6";
+                header2.innerText = "PHẦN 2: CÂU HỎI TRẮC NGHIỆM ĐÚNG / SAI";
+                container.appendChild(header2);
+
+                tfs.forEach((q, idx) => {
+                    const card = document.createElement('div');
+                    card.className = "bg-white p-4 rounded-lg shadow-sm border border-gray-200 space-y-3";
+
+                    // Đánh số thứ tự liên tục 1, 2, 3...
+                    const cleanTextTf = cleanQuestionTitle(q.question);
+                    const qTfText = `Câu ${idx + 1}: ${cleanTextTf}`;
+                    card.innerHTML = `<div class="font-semibold text-gray-900">${qTfText}</div>`;
+
+                    const subDiv = document.createElement('div');
+                    subDiv.className = "space-y-3";
+                    q.sub_items.forEach(sub => {
+                        subDiv.innerHTML += `
+                            <div class="border-t pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <span class="text-sm"><b>${sub.key})</b> ${sub.text}</span>
+                                <div class="flex items-center space-x-4 self-end sm:self-auto shrink-0">
+                                    <label class="flex items-center space-x-1 cursor-pointer">
+                                        <input type="radio" name="tf_${q.id}_${sub.key}" value="Đ" onchange="selectTf(${q.id}, '${sub.key}', 'Đ')" class="h-4 w-4 text-green-600">
+                                        <span class="text-sm font-bold text-green-700">Đúng</span>
+                                    </label>
+                                    <label class="flex items-center space-x-1 cursor-pointer">
+                                        <input type="radio" name="tf_${q.id}_${sub.key}" value="S" onchange="selectTf(${q.id}, '${sub.key}', 'S')" class="h-4 w-4 text-red-600">
+                                        <span class="text-sm font-bold text-red-700">Sai</span>
+                                    </label>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    card.appendChild(subDiv);
+                    container.appendChild(card);
+                });
+            }
+        }
+
+        // Chọn trắc nghiệm: Lưu cục bộ và đồng bộ tức thời lên Server
+        function selectMcq(qId, key) {
+            if (isSubmitted) return;
+            studentAnswers[`mcq_${qId}`] = key;
+            socket.emit('sync_answer', { key: `mcq_${qId}`, val: key });
+        }
+
+        // Chọn Đúng/Sai: Lưu cục bộ và đồng bộ tức thời lên Server
+        function selectTf(qId, subKey, val) {
+            if (isSubmitted) return;
+            studentAnswers[`tf_${qId}_${subKey}`] = val;
+            socket.emit('sync_answer', { key: `tf_${qId}_${subKey}`, val: val });
+        }
+
+        function startCountdown() {
+            if (timerInterval) clearInterval(timerInterval);
+            updateTimerDisplay();
+
+            timerInterval = setInterval(() => {
+                if (timeLeft > 0) {
+                    timeLeft--;
+                    updateTimerDisplay();
+                    if (timeLeft % 5 === 0) {
+                        socket.emit('sync_timer', { time_left: timeLeft });
+                    }
+                } else {
+                    clearInterval(timerInterval);
+                    autoSubmitOnTimeUp();
+                }
+            }, 1000);
+        }
+
+        function updateTimerDisplay() {
+            const minutes = Math.floor(timeLeft / 60);
+            const seconds = timeLeft % 60;
+            document.getElementById('countdownTimer').innerText = 
+                `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        function confirmSubmit() {
+            if (isSubmitted) return;
+            Swal.fire({
+                title: 'Nộp bài thi?',
+                text: 'Bạn có chắc chắn muốn nộp bài thi ngay bây giờ?',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#0b3c6d',
+                cancelButtonColor: '#6b7280',
+                confirmButtonText: 'Đồng ý nộp',
+                cancelButtonText: 'Làm tiếp'
+            }).then((res) => {
+                if (res.isConfirmed) {
+                    doSubmit();
+                }
+            });
+        }
+
+        // Tự động nộp khi hết giờ: Nộp bài lên Server trước rồi mới hiển thị thông báo
+        function autoSubmitOnTimeUp() {
+            if (isSubmitted) return;
+            doSubmit();
+
+            Swal.fire({
+                title: 'Hết giờ làm bài!',
+                text: 'Hệ thống đã tự động thu và nộp bài thi của bạn.',
+                icon: 'info',
+                confirmButtonColor: '#0b3c6d',
+                confirmButtonText: 'Đã hiểu',
+                allowOutsideClick: false
+            });
+        }
+
+        function doSubmit() {
+            if (isSubmitted) return;
+            isSubmitted = true;
+            isExamActive = false;
+            if (timerInterval) clearInterval(timerInterval);
+
+            // Chuyển trạng thái nút nộp
+            const btn = document.getElementById('btnSubmit');
+            btn.innerText = "Đã nộp bài";
+            btn.disabled = true;
+            btn.classList.replace('bg-green-700', 'bg-gray-500');
+            btn.classList.replace('hover:bg-green-800', 'cursor-not-allowed');
+
+            // Khóa toàn bộ lựa chọn radio
+            document.querySelectorAll('input[type="radio"]').forEach(el => el.disabled = true);
+
+            // Gửi dữ liệu nộp bài chính thức
+            socket.emit('submit_exam', studentAnswers);
+        }
+
+        socket.on('exam_finished_ack', (data) => {
+            Swal.fire({
+                title: 'Hoàn thành bài thi!',
+                text: `Điểm số của bạn: ${data.score} điểm`,
+                icon: 'success',
+                confirmButtonColor: '#0b3c6d',
+                confirmButtonText: 'Đóng',
+                allowOutsideClick: false
+            });
+        });
+
+        // BỘ GIÁM SÁT GIAN LẬN: Bắt khi ẩn trang, chuyển tab, mất focus, thu nhỏ
+        function recordViolation() {
+            if (isExamActive && !isSubmitted) {
+                socket.emit('report_violation');
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'CẢNH BÁO VI PHẠM!',
+                    text: 'Hệ thống đã ghi nhận hành vi rời khỏi màn hình bài thi!',
+                    confirmButtonColor: '#0b3c6d',
+                    confirmButtonText: 'Quay lại làm bài',
+                    timer: 3000
+                });
+            }
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                recordViolation();
+            }
+        });
+
+        window.addEventListener('blur', () => {
+            recordViolation();
+        });
+
+        window.addEventListener('pagehide', () => {
+            recordViolation();
+        });
+    </script>
+</body>
+</html>
