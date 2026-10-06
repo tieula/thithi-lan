@@ -1,7 +1,6 @@
-﻿# -*- coding: utf-8 -*-
 import eventlet
-
 eventlet.monkey_patch()
+# -*- coding: utf-8 -*-
 import os
 import socket
 import re
@@ -575,5 +574,6 @@ def teacher_start():
         emit('start_exam_now', client_payload, room=sid)
 
 if __name__ == '__main__':
-    print(f"[*] Server LAN Exam đang chạy: http://{get_lan_ip()}:5000")
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    import os
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
