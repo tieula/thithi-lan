@@ -48,7 +48,12 @@ exam_state = {
     "students": {}  # sid -> {ip, name, time_left, violations, submitted, score, answers, exam}
 }
 
-def get_lan_ip():
+def get_base_url():
+    """Tự động ưu tiên domain Render khi chạy online để tạo QR chuẩn xác"""
+    render_url = os.environ.get('RENDER_EXTERNAL_URL')
+    if render_url:
+        return render_url.rstrip('/')
+    # Nếu chạy offline mạng LAN tại trường
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(('8.8.8.8', 80))
@@ -57,7 +62,7 @@ def get_lan_ip():
         ip = '127.0.0.1'
     finally:
         s.close()
-    return ip
+    return f"http://{ip}:5000"
 
 def clean_question_text(raw_text):
     """Gọt sạch tiền tố 'Câu 1:', 'Câu 15.', 'Câu 48:' cũ trong văn bản ngân hàng đề"""
@@ -66,28 +71,19 @@ def clean_question_text(raw_text):
     return re.sub(r'^(câu\s*\d+[\s\:\.\-\)]*)\s*', '', raw_text.strip(), flags=re.IGNORECASE)
 
 def generate_individual_exam():
-    """
-    Tạo đề thi ngẫu nhiên riêng cho từng thí sinh:
-    - Rút ngẫu nhiên số lượng câu hỏi từ ngân hàng.
-    - Xáo trộn hoàn toàn thứ tự câu hỏi và gọt bỏ tiền tố 'Câu X:' cũ.
-    - Xáo trộn phương án A, B, C, D của từng câu Trắc nghiệm.
-    - Trả về: (Dữ liệu gửi học sinh làm bài, Dữ liệu đầy đủ kèm đáp án đúng để lưu chấm điểm)
-    """
+    """Tạo đề thi ngẫu nhiên riêng cho từng thí sinh"""
     num_mcq = min(exam_state["active_exam"]["num_mcq"], len(exam_state["raw_bank"]["mcq"]))
     num_tf = min(exam_state["active_exam"]["num_tf"], len(exam_state["raw_bank"]["tf"]))
 
-    # 1. Rút ngẫu nhiên các câu hỏi từ ngân hàng
     selected_mcq_raw = random.sample(exam_state["raw_bank"]["mcq"], num_mcq) if num_mcq > 0 else []
     selected_tf_raw = random.sample(exam_state["raw_bank"]["tf"], num_tf) if num_tf > 0 else []
 
-    # Xáo trộn hoàn toàn thứ tự các câu hỏi vừa bốc được
     random.shuffle(selected_mcq_raw)
     random.shuffle(selected_tf_raw)
 
     mcq_send = []
     mcq_server = []
 
-    # 2. Gọt sạch số câu cũ và xáo trộn phương án trắc nghiệm cho từng câu
     labels = ['A', 'B', 'C', 'D']
     for idx, q in enumerate(selected_mcq_raw, 1):
         shuffled_opts = copy.deepcopy(q['options'])
@@ -115,7 +111,6 @@ def generate_individual_exam():
             "options": server_opts
         })
 
-    # 3. Gọt sạch số câu cũ cho câu hỏi Đúng / Sai
     tf_send = []
     tf_server = []
     for idx, q in enumerate(selected_tf_raw, 1):
@@ -148,12 +143,11 @@ def generate_individual_exam():
     return client_payload, server_exam
 
 def update_summary_excel():
-    """Tự động cập nhật tệp bảng điểm chung kèm bảng thống kê bên dưới danh sách thí sinh"""
+    """Tự động cập nhật tệp bảng điểm chung kèm bảng thống kê"""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Bang_Diem_Tong_Hop"
 
-    # Định dạng viền (Border) và Font chữ
     thin_border = Border(
         left=Side(style='thin', color='B0B0B0'),
         right=Side(style='thin', color='B0B0B0'),
@@ -165,7 +159,6 @@ def update_summary_excel():
     bold_font = Font(name="Arial", size=10, bold=True)
     regular_font = Font(name="Arial", size=10)
 
-    # 1. TIÊU ĐỀ BẢNG DANH SÁCH THÍ SINH
     headers = ["TT", "Địa chỉ IP", "Họ và tên", "Thời gian còn lại", "Vi phạm", "Trạng thái", "Điểm số"]
     ws.append(headers)
     for col_idx in range(1, len(headers) + 1):
@@ -175,7 +168,6 @@ def update_summary_excel():
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = thin_border
 
-    # 2. XUẤT DANH SÁCH THÍ SINH VÀ THU THẬP ĐIỂM
     scores_list = []
     idx = 1
     current_row = 2
@@ -196,7 +188,6 @@ def update_summary_excel():
             score_val
         ])
 
-        # Căn chỉnh style từng ô danh sách
         for col_idx in range(1, 8):
             c = ws.cell(row=current_row, column=col_idx)
             c.font = regular_font
@@ -212,7 +203,6 @@ def update_summary_excel():
         idx += 1
         current_row += 1
 
-    # 3. TÍNH TOÁN CÁC MỨC THỐNG KÊ (Chuẩn theo: <= 5.0, <= 6.5, <= 8.0, > 8)
     total_students = len(scores_list)
     cnt_duoi_5 = sum(1 for s in scores_list if s <= 5.0)
     cnt_duoi_65 = sum(1 for s in scores_list if 5.0 < s <= 6.5)
@@ -224,9 +214,7 @@ def update_summary_excel():
             return "0.0%"
         return f"{round((count / total_students) * 100, 1)}%"
 
-    # 4. CHÈN BẢNG THỐNG KÊ (Cách danh sách 2 dòng trống)
     stat_start_row = current_row + 2
-
     stat_headers = ["Mức điểm", "Tỉ lệ", "Số lượng"]
     stat_data = [
         ["<= 5.0", calc_rate(cnt_duoi_5), cnt_duoi_5],
@@ -235,7 +223,6 @@ def update_summary_excel():
         ["> 8", calc_rate(cnt_tren_8), cnt_tren_8]
     ]
 
-    # In dòng tiêu đề bảng thống kê
     for c_idx, h_text in enumerate(stat_headers, 1):
         cell = ws.cell(row=stat_start_row, column=c_idx, value=h_text)
         cell.font = bold_font
@@ -243,7 +230,6 @@ def update_summary_excel():
         cell.border = thin_border
         cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
 
-    # In từng dòng phân loại mức điểm
     for r_offset, row_values in enumerate(stat_data, 1):
         r_idx = stat_start_row + r_offset
         for c_idx, val in enumerate(row_values, 1):
@@ -252,7 +238,6 @@ def update_summary_excel():
             cell.border = thin_border
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Tự động căn chỉnh độ rộng cột
     col_widths = {1: 12, 2: 20, 3: 32, 4: 20, 5: 14, 6: 16, 7: 14}
     for col_idx, width in col_widths.items():
         col_letter = get_column_letter(col_idx)
@@ -262,7 +247,7 @@ def update_summary_excel():
     wb.save(summary_path)
 
 def save_individual_submission(st, answers, score):
-    """Xuất file bài làm chi tiết của từng thí sinh theo tên IP (đúng theo mã đề riêng của thí sinh)"""
+    """Xuất file bài làm chi tiết của từng thí sinh"""
     safe_ip = st["ip"].replace(":", "_")
     filename = f"{safe_ip}.txt"
     filepath = os.path.join(SUBMISSION_DIR, filename)
@@ -321,7 +306,6 @@ def process_grading(sid, answers):
         }
 
     score = 0.0
-    # 1. Chấm Trắc nghiệm theo đề riêng
     mcq_pts = exam_state["active_exam"].get("score_per_mcq", 0.25)
     for q in student_exam.get("mcq", []):
         ans = answers.get(f"mcq_{q['id']}")
@@ -329,7 +313,6 @@ def process_grading(sid, answers):
         if ans == correct_opt:
             score += mcq_pts
 
-    # 2. Chấm Đúng / Sai theo đề riêng
     tf_pts = exam_state["active_exam"].get("score_per_tf", 1.0)
     scale = exam_state["active_exam"].get("tf_scale", {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0})
     for q in student_exam.get("tf", []):
@@ -345,7 +328,6 @@ def process_grading(sid, answers):
     st["score"] = round(score, 2)
     st["time_left"] = 0
 
-    # Lưu bài làm cá nhân và cập nhật bảng điểm tổng hợp
     save_individual_submission(st, answers, st["score"])
     update_summary_excel()
 
@@ -362,7 +344,13 @@ def student_view():
 
 @app.route('/api/get_ip', methods=['GET'])
 def api_get_ip():
-    return jsonify({"ip": get_lan_ip(), "port": 5000})
+    base_url = get_base_url()
+    # Trả về URL chuẩn của học sinh để tạo QR và hiển thị thông tin ca thi
+    return jsonify({
+        "ip": base_url.replace("http://", "").replace("https://", "").split(":")[0],
+        "port": 5000,
+        "url": f"{base_url}/student"
+    })
 
 @app.route('/api/upload_bank', methods=['POST'])
 def upload_bank():
@@ -452,6 +440,11 @@ def upload_bank():
 
 @app.route('/api/configure_exam', methods=['POST'])
 def configure_exam():
+    # Khi giáo viên cấu hình ca thi mới: dọn sạch hoàn toàn danh sách thí sinh cũ
+    global submitted_ips
+    submitted_ips.clear()
+    exam_state["students"].clear()
+
     data = request.json
     n_mcq = data.get("num_mcq", 0)
     s_mcq = data.get("score_mcq", 0.0)
@@ -459,6 +452,7 @@ def configure_exam():
     s_tf = data.get("score_tf", 0.0)
     dur = data.get("duration", 15)
 
+    exam_state["class_name"] = data.get("class_name", "")
     exam_state["active_exam"].update({
         "num_mcq": n_mcq,
         "score_mcq": s_mcq,
@@ -470,6 +464,7 @@ def configure_exam():
         "tf_scale": data.get("tf_scale", {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0}),
         "status": "ready"
     })
+    socketio.emit('update_teacher_list', [])
     return jsonify({"success": True})
 
 @app.route('/api/export_excel', methods=['GET'])
@@ -486,14 +481,12 @@ def handle_student_join(data):
     sid = request.sid
     client_ip = request.remote_addr
 
-    # KIỂM TRA CHẶN THI LẦN 2
     if client_ip in submitted_ips:
         emit('exam_blocked', {'message': 'Bạn đã thi rồi!'}, room=sid)
         return
 
     name = data.get('name', 'Thí sinh').strip() or 'Thí sinh'
 
-    # Tính thời gian còn lại chuẩn xác
     time_left = exam_state["active_exam"]["duration"] * 60
     if exam_state["active_exam"]["status"] == "running" and exam_state["active_exam"]["start_time"]:
         elapsed = int(time.time() - exam_state["active_exam"]["start_time"])
@@ -511,7 +504,6 @@ def handle_student_join(data):
     }
     emit('update_teacher_list', list(exam_state["students"].values()), broadcast=True)
 
-    # Thí sinh vào sau khi đã bắt đầu: Tự động phát đề ngẫu nhiên riêng ngay cho em đó
     if exam_state["active_exam"]["status"] == "running":
         client_payload, server_exam = generate_individual_exam()
         exam_state["students"][sid]["exam"] = server_exam
@@ -520,7 +512,6 @@ def handle_student_join(data):
 
 @socketio.on('sync_answer')
 def handle_sync_answer(data):
-    """Đồng bộ từng đáp án thí sinh vừa tích chọn lên server theo thời gian thực"""
     sid = request.sid
     if sid in exam_state["students"]:
         key = data.get("key")
@@ -530,14 +521,12 @@ def handle_sync_answer(data):
 
 @socketio.on('sync_timer')
 def handle_timer_sync(data):
-    """Đồng bộ đồng hồ; Cưỡng chế chấm bài khi thời gian về 0 nếu thí sinh chưa nộp"""
     sid = request.sid
     if sid in exam_state["students"]:
         st = exam_state["students"][sid]
         t_left = data.get("time_left", 0)
         st["time_left"] = t_left
 
-        # CƯỠNG CHẾ THU VÀ CHẤM BÀI NẾU HẾT GIỜ MÀ THÍ SINH CỐ TÌNH KHÔNG BẤM NỘP
         if t_left <= 0 and st["submitted"] != "Đã nộp":
             process_grading(sid, st.get("answers", {}))
             return
@@ -553,27 +542,33 @@ def handle_violation():
 
 @socketio.on('submit_exam')
 def handle_submit(answers):
-    """Thí sinh chủ động bấm nút nộp bài"""
     sid = request.sid
     process_grading(sid, answers)
 
 @socketio.on('teacher_start_exam')
 def teacher_start():
     global submitted_ips
-    submitted_ips.clear()  # Xóa danh sách chặn cũ khi bắt đầu ca thi mới
+    submitted_ips.clear()
 
     exam_state["active_exam"]["status"] = "running"
     exam_state["active_exam"]["start_time"] = time.time()
     
-    # Phát đề ngẫu nhiên riêng biệt cho từng thí sinh đang trực tuyến
     duration_secs = exam_state["active_exam"]["duration"] * 60
     for sid, st in exam_state["students"].items():
         client_payload, server_exam = generate_individual_exam()
-        st["exam"] = server_exam  # Lưu lại đề và đáp án riêng của thí sinh vào session server
+        st["exam"] = server_exam
         client_payload["time_left"] = duration_secs
         emit('start_exam_now', client_payload, room=sid)
 
+@socketio.on('reset_exam_session')
+def handle_reset_session():
+    """Hỗ trợ nút Đóng/Bỏ qua từ phía giáo viên để xóa sạch ca thi"""
+    global submitted_ips
+    submitted_ips.clear()
+    exam_state["students"].clear()
+    exam_state["active_exam"]["status"] = "waiting"
+    emit('update_teacher_list', [], broadcast=True)
+
 if __name__ == '__main__':
-    import os
     port = int(os.environ.get('PORT', 5000))
     socketio.run(app, host='0.0.0.0', port=port, debug=False)
