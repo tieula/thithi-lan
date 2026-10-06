@@ -1,460 +1,312 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hệ thống thi Offline LAN Exam</title>
-
-    <script src="{{ url_for('static', filename='tailwind.js') }}"></script>
-    
-    <script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
-   
-    <script src="{{ url_for('static', filename='sweetalert2.all.min.js') }}"></script>
-
-    <script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
-    
-   
-
-
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
     <style>
-        * { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-        .navy-header { background-color: #0b3c6d; }
-        .navy-btn { background-color: #0b3c6d; color: #ffffff; }
-        .navy-btn:hover { background-color: #082d52; }
-        .navy-text { color: #0b3c6d; }
-
-        /* Đổi vòng tròn và dấu tích V của SweetAlert2 sang màu Navy */
-        .swal2-icon.swal2-success {
-            border-color: #0b3c6d !important;
-        }
-        .swal2-icon.swal2-success .swal2-success-line-tip,
-        .swal2-icon.swal2-success .swal2-success-line-long {
-            background-color: #0b3c6d !important;
-        }
-        .swal2-icon.swal2-success .swal2-success-ring {
-            border-color: rgba(11, 60, 109, 0.3) !important;
-        }
-
-        /* Đổi vòng tròn và chữ i của SweetAlert2 sang màu Navy */
-        .swal2-icon.swal2-info {
-            border-color: #0b3c6d !important;
-            color: #0b3c6d !important;
-        }
-
-        /* Đổi vòng tròn và dấu chấm than cảnh báo của SweetAlert2 sang màu Navy */
-        .swal2-icon.swal2-warning {
-            border-color: #0b3c6d !important;
-            color: #0b3c6d !important;
-        }
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .main-header { background-color: #0b3c6d; color: white; border-radius: 6px; padding: 18px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .card-custom { border: 1px solid #dcdcdc; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); background: white; }
+        .btn-custom { background-color: #0b3c6d; color: white; border: none; font-weight: 500; }
+        .btn-custom:hover { background-color: #08294a; color: white; }
+        .table thead th { background-color: #0b3c6d; color: white; text-align: center; vertical-align: middle; border: 1px solid #dee2e6; }
+        .table tbody td { text-align: center; vertical-align: middle; border: 1px solid #dee2e6; }
+        #qrcode-container { width: 180px; height: 180px; border: 2px dashed #b0b0b0; display: flex; align-items: center; justify-content: center; background: #fafafa; margin: auto; }
+        #qrcode-container img { margin: auto; }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col justify-between antialiased">
+<body class="p-3">
 
-    <div class="w-full max-w-5xl mx-auto p-4 flex-1">
-        <!-- HEADER -->
-        <div class="navy-header text-white text-center py-3 px-4 font-bold text-base md:text-lg rounded shadow">
-            HỆ THỐNG TỔ CHỨC KIỂM TRA ĐÁNH GIÁ TRẮC NGHIỆM QUA MẠNG CỤC BỘ (OFFLINE LAN EXAM)<br>
-            TÍCH HỢP TRÍ TUỆ NHÂN TẠO TRÊN THIẾT BỊ DI ĐỘNG
-        </div>
-
-        <!-- THÔNG TIN & QR -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
-            <div class="md:col-span-1 border-2 border-dashed border-gray-400 bg-white h-48 flex items-center justify-center rounded p-2">
-                <div id="qrcode"></div>
-            </div>
-
-            <div class="md:col-span-3 border border-gray-300 bg-white p-4 rounded shadow-sm flex flex-col justify-around text-sm">
-                <h2 class="text-center font-bold text-gray-800 tracking-wide text-base">THÔNG TIN CA THI & CẤU HÌNH ĐỀ</h2>
-                <div class="space-y-1 mt-2">
-                    <div>• Lớp : <span id="displayClass" class="navy-text font-semibold">Chưa nhập</span> &nbsp; Đã vào phòng : <span id="onlineCount" class="navy-text font-semibold">0</span> thí sinh</div>
-                    <div>• Địa chỉ truy cập : <span id="displayIp" class="navy-text font-semibold">http://...</span> hoặc quét mã QR bên cạnh</div>
-                    <div>• Cấu hình : <span id="displayNumMcq" class="navy-text font-semibold">...</span> câu Trắc nghiệm và <span id="displayNumTf" class="navy-text font-semibold">...</span> câu Đúng/Sai</div>
-                    <div>• Thời gian : <span id="displayDuration" class="navy-text font-semibold">...</span> phút</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- CÁC NÚT ĐIỀU KHIỂN -->
-
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 text-xs font-semibold">
-            <div class="md:col-span-1">
-                <button onclick="generateQR()" class="w-full navy-btn py-2 px-2 rounded shadow text-center transition">Tạo mã QR tự động</button>
-            </div>
-            <div class="md:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-2">
-                <label class="w-full navy-btn py-2 px-1 rounded shadow text-center cursor-pointer flex items-center justify-center transition">
-                    Import ngân hàng đề
-                    <input type="file" id="fileBankInput" accept=".docx" class="hidden" onchange="uploadFileBank(event)">
-                </label>
-                <button onclick="openSubform()" class="w-full navy-btn py-2 px-1 rounded shadow text-center transition">AI tạo đề kiểm tra</button>
-                <button onclick="startExam()" id="btnStartExam" class="w-full navy-btn py-2 px-1 rounded shadow text-center transition">Bắt đầu làm bài</button>
-                <button onclick="exportExcelResult()" class="w-full navy-btn py-2 px-1 rounded shadow text-center transition">AI phân tích kết quả</button>
-            </div>
-        </div>
-
-        <!-- BẢNG GIÁM SÁT THÍ SINH -->
-        <div class="mt-4 bg-white border border-gray-300 rounded shadow-sm overflow-x-auto">
-            <table class="w-full text-left border-collapse text-xs md:text-sm">
-                <thead>
-                    <tr class="navy-header text-white text-center">
-                        <td class="border border-gray-300 py-1 px-1 w-10">TT</td>
-                        <td class="border border-gray-300 py-1 px-2 w-32">Địa chỉ IP thí sinh</td>
-                        <td class="border border-gray-300 py-1 px-4">Họ và tên</td>
-                        <td class="border border-gray-300 py-1 px-2">Thời gian còn lại</td>
-                        <td class="border border-gray-300 py-1 px-2">Vi phạm</td>
-                        <td class="border border-gray-300 py-1 px-2">Đã nộp</td>
-                        <td class="border border-gray-300 py-1 px-2">Điểm số</td>
-                    </tr>
-                </thead>
-                <tbody id="studentTableBody">
-                    <tr><td colspan="7" class="text-center py-4 text-gray-500">Chưa có thí sinh kết nối</td></tr>
-                </tbody>
-            </table>
-        </div>
-
-        <div class="flex justify-end gap-3 mt-4">
-            <button onclick="location.reload()" class="navy-btn font-semibold py-1.5 px-6 rounded text-sm transition">Bỏ qua</button>
-            <button onclick="window.close()" class="navy-btn font-semibold py-1.5 px-6 rounded text-sm transition">Đóng</button>
-        </div>
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="main-header text-center">
+        <h4 class="m-0 fw-bold">HỆ THỐNG TỔ CHỨC KIỂM TRA ĐÁNH GIÁ TRẮC NGHIỆM QUA MẠNG CỤC BỘ (OFFLINE LAN EXAM)</h4>
+        <h5 class="m-0 mt-1 fw-bold">TÍCH HỢP TRÍ TUỆ NHÂN TẠO TRÊN THIẾT BỊ DI ĐỘNG</h5>
     </div>
 
-<footer class="text-center py-2 text-xs text-gray-700 font-semibold border-t bg-gray-200">
-    © 2026 LAN Exam v1.0 • Tác giả: Dương Hồng Hải – THPT Tiểu La – TP Đà Nẵng
-</footer>
-
-    <!-- MODAL CẤU HÌNH -->
-    <div id="subformModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center p-3 z-50">
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-5 text-sm space-y-3">
-            <h3 class="font-bold text-base navy-text border-b pb-2">CẤU HÌNH TẠO ĐỀ KIỂM TRA</h3>
-            <div>
-                <label class="block font-medium">Tên ngân hàng đề:</label>
-                <input type="text" id="subBankName" class="w-full bg-gray-100 border p-1.5 rounded" readonly>
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-                <div>
-                    <label class="block font-medium">Khối học:</label>
-                    <select id="subGrade" class="w-full border p-1.5 rounded">
-                        <option value="12" selected>Khối 12</option><option value="11">Khối 11</option><option value="10">Khối 10</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block font-medium">Môn học:</label>
-                    <select id="subSubject" class="w-full border p-1.5 rounded">
-                        <option value="Tin học" selected>Tin học</option><option value="Toán">Toán</option>
-                    </select>
+    <!-- Khung thông tin ca thi & QR -->
+    <div class="card card-custom p-4 mb-4">
+        <div class="row align-items-center">
+            <div class="col-md-3 text-center">
+                <div id="qrcode-container">
+                    <span id="qr-placeholder" class="text-muted small">Chưa tạo mã QR</span>
+                    <div id="qrcode"></div>
                 </div>
             </div>
-            <div>
-                <label class="block font-medium">Thời gian làm bài (phút > 0):</label>
-                <input type="number" id="subDuration" class="w-full border p-1.5 rounded" value="15" min="1">
-            </div>
-
-            <!-- Cấu hình Trắc nghiệm -->
-            <div class="p-2 border rounded bg-gray-50">
-                <div class="grid grid-cols-3 gap-2">
-                    <div>
-                        <label class="block text-xs font-semibold">Số câu TN:</label>
-                        <input type="number" id="subNumMcq" class="w-full border p-1 rounded" value="10" min="0" oninput="calculatePoints()">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold">Tổng điểm TN:</label>
-                        <input type="number" id="subScoreMcq" class="w-full border p-1 rounded" value="7.0" step="0.1" oninput="calculatePoints()">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold">Điểm/câu:</label>
-                        <input type="text" id="subPptMcq" class="w-full bg-gray-200 border p-1 rounded text-center" readonly value="0.700">
-                    </div>
-                </div>
-            </div>
-
-            <!-- Cấu hình Đúng sai -->
-            <div class="p-2 border rounded bg-gray-50">
-                <div class="grid grid-cols-3 gap-2">
-                    <div>
-                        <label class="block text-xs font-semibold">Số câu Đ/S:</label>
-                        <input type="number" id="subNumTf" class="w-full border p-1 rounded" value="2" min="0" oninput="calculatePoints()">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold">Tổng điểm Đ/S:</label>
-                        <input type="number" id="subScoreTf" class="w-full border p-1 rounded" value="3.0" step="0.1" oninput="calculatePoints()">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold">Điểm/câu:</label>
-                        <input type="text" id="subPptTf" class="w-full bg-gray-200 border p-1 rounded text-center" readonly value="1.500">
-                    </div>
-                </div>
-            </div>
-
-            <!-- Cấu hình thang điểm Đ/S kiểu Azota -->
-            <div class="p-2 border rounded bg-blue-50 space-y-1">
-                <span class="block font-medium text-gray-700 mb-1">Cấu hình thang điểm Đúng/Sai (% điểm của câu):</span>
-                <div class="grid grid-cols-4 gap-2 text-center">
-                    <div>
-                        <label class="block text-[11px] text-gray-600">Đúng 1 ý</label>
-                        <div class="flex items-center border bg-white rounded px-1">
-                            <input type="number" id="subTfP1" class="w-full text-xs text-center focus:outline-none" value="10" min="0" max="100">
-                            <span class="text-[11px] text-gray-500">%</span>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-[11px] text-gray-600">Đúng 2 ý</label>
-                        <div class="flex items-center border bg-white rounded px-1">
-                            <input type="number" id="subTfP2" class="w-full text-xs text-center focus:outline-none" value="25" min="0" max="100">
-                            <span class="text-[11px] text-gray-500">%</span>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-[11px] text-gray-600">Đúng 3 ý</label>
-                        <div class="flex items-center border bg-white rounded px-1">
-                            <input type="number" id="subTfP3" class="w-full text-xs text-center focus:outline-none" value="50" min="0" max="100">
-                            <span class="text-[11px] text-gray-500">%</span>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-[11px] text-gray-600">Đúng 4 ý</label>
-                        <div class="flex items-center border bg-white rounded px-1">
-                            <input type="number" id="subTfP4" class="w-full text-xs text-center focus:outline-none" value="100" min="0" max="100">
-                            <span class="text-[11px] text-gray-500">%</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="flex justify-end gap-2 pt-2 border-t">
-                <button onclick="closeSubform()" class="navy-btn px-4 py-1 rounded transition">Bỏ qua</button>
-                <button onclick="saveSubform()" class="navy-btn px-4 py-1 rounded transition">Lưu</button>
-                <button onclick="closeSubform()" class="navy-btn px-4 py-1 rounded transition">Thoát</button>
+            <div class="col-md-9 border-start ps-4">
+                <h5 class="fw-bold text-center mb-3">THÔNG TIN CA THI & CẤU HÌNH ĐỀ</h5>
+                <ul class="list-unstyled mb-0 lh-lg fs-6">
+                    <li>• Lớp : <strong id="lbl-class" class="text-primary">Chưa nhập</strong> | Đã vào phòng : <strong id="lbl-count" class="text-primary">0</strong> thí sinh</li>
+                    <li>• Địa chỉ truy cập : <a id="lbl-url" href="#" target="_blank" class="fw-bold text-decoration-none">http://...</a> hoặc quét mã QR bên cạnh</li>
+                    <li>• Cấu hình : <span id="lbl-config">... câu Trắc nghiệm và ... câu Đúng/Sai</span></li>
+                    <li>• Thời gian : <span id="lbl-duration">...</span> phút</li>
+                </ul>
             </div>
         </div>
     </div>
 
-    <script>
-        const socket = io();
-        let totalMcqAvailable = 0;
-        let totalTfAvailable = 0;
-        let examCountdownTimer = null;
+    <!-- Thanh nút chức năng điều khiển -->
+    <div class="row g-2 mb-4">
+        <div class="col">
+            <button class="btn btn-custom w-100 py-2" onclick="taoMaQRTuDong()">Tạo mã QR tự động</button>
+        </div>
+        <div class="col">
+            <button class="btn btn-custom w-100 py-2" onclick="document.getElementById('file-upload').click()">Import ngân hàng đề</button>
+            <input type="file" id="file-upload" accept=".docx" style="display: none;" onchange="uploadFileDe(this)">
+        </div>
+        <div class="col">
+            <button class="btn btn-custom w-100 py-2" onclick="moModalCauHinh()">AI tạo đề kiểm tra</button>
+        </div>
+        <div class="col">
+            <button id="btn-start" class="btn btn-custom w-100 py-2" onclick="batDauThi()">Bắt đầu làm bài</button>
+        </div>
+        <div class="col">
+            <a href="/api/export_excel" class="btn btn-custom w-100 py-2">AI phân tích kết quả</a>
+        </div>
+    </div>
 
-        window.addEventListener('DOMContentLoaded', () => {
-            Swal.fire({
-                title: '<span style="font-size: 18px; font-weight: bold; color: #0b3c6d;">Nhập thông tin Lớp</span>',
-                input: 'text',
-                inputPlaceholder: 'Ví dụ: 12A1',
-                width: '360px',
-                padding: '1.25rem',
-                confirmButtonColor: '#0b3c6d',
-                confirmButtonText: 'Xác nhận',
-                allowOutsideClick: false,
-                customClass: {
-                    input: 'text-sm text-center font-semibold uppercase tracking-wider',
-                    confirmButton: 'text-xs px-6 py-2 rounded shadow font-semibold'
-                },
-                didOpen: () => {
-                    const input = Swal.getInput();
-                    if (input) {
-                        input.style.height = '38px';
-                        input.style.borderRadius = '4px';
-                        input.style.border = '1px solid #0b3c6d';
-                        input.style.outline = 'none';
-                        input.style.boxShadow = 'none';
-                        input.style.margin = '1rem auto 0 auto';
-                    }
-                }
-            }).then((res) => {
-                if (res.value && res.value.trim() !== "") {
-                    document.getElementById('displayClass').innerText = res.value.trim().toUpperCase();
-                }
+    <!-- Bảng danh sách thí sinh -->
+    <div class="card card-custom p-0 overflow-hidden mb-4">
+        <table class="table table-bordered table-hover m-0">
+            <thead>
+                <tr>
+                    <th style="width: 50px;">TT</th>
+                    <th style="width: 140px;">Địa chỉ IP thí sinh</th>
+                    <th>Họ và tên</th>
+                    <th style="width: 150px;">Thời gian còn lại</th>
+                    <th style="width: 100px;">Vi phạm</th>
+                    <th style="width: 120px;">Đã nộp</th>
+                    <th style="width: 100px;">Điểm số</th>
+                </tr>
+            </thead>
+            <tbody id="student-tbody">
+                <tr>
+                    <td colspan="7" class="text-muted py-3">Chưa có thí sinh kết nối</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 2 Nút chức năng chân trang -->
+    <div class="d-flex justify-content-end gap-2 mb-4">
+        <button type="button" class="btn btn-primary px-4 py-2 fw-bold" onclick="taoCaThiMoi()">Tạo mới</button>
+        <button type="button" class="btn btn-danger px-4 py-2 fw-bold" onclick="dongTrangWeb()">Đóng</button>
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center text-muted small mt-4 pb-3">
+        © 2026 LAN Exam v1.0 • Tác giả: Dương Hồng Hải – THPT Tiểu La – TP Đà Nẵng
+    </footer>
+</div>
+
+<!-- Modal cấu hình ca thi -->
+<div class="modal fade" id="modalCauHinh" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title fw-bold">Cấu hình ca thi</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Tên lớp:</label>
+                    <input type="text" id="cfg-class" class="form-control" placeholder="Ví dụ: 12A1">
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col">
+                        <label class="form-label fw-bold">Số câu trắc nghiệm:</label>
+                        <input type="number" id="cfg-mcq" class="form-control" value="20">
+                    </div>
+                    <div class="col">
+                        <label class="form-label fw-bold">Điểm phần TN:</label>
+                        <input type="number" id="cfg-score-mcq" class="form-control" value="5.0" step="0.1">
+                    </div>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col">
+                        <label class="form-label fw-bold">Số câu Đúng/Sai:</label>
+                        <input type="number" id="cfg-tf" class="form-control" value="4">
+                    </div>
+                    <div class="col">
+                        <label class="form-label fw-bold">Điểm phần Đ/S:</label>
+                        <input type="number" id="cfg-score-tf" class="form-control" value="5.0" step="0.1">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Thời gian thi (phút):</label>
+                    <input type="number" id="cfg-duration" class="form-control" value="45">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-primary" onclick="luuCauHinhCaThi()">Lưu cấu hình</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const socket = io();
+    let currentStudentUrl = "";
+    let modalConfig = null;
+
+    document.addEventListener("DOMContentLoaded", function() {
+        modalConfig = new bootstrap.Modal(document.getElementById('modalCauHinh'));
+        khoiTaoDiaChiTruyCap();
+    });
+
+    // Lấy link truy cập chuẩn (Render hoặc LAN)
+    function khoiTaoDiaChiTruyCap() {
+        fetch('/api/get_ip')
+            .then(res => res.json())
+            .then(data => {
+                currentStudentUrl = data.url || (window.location.origin + "/student");
+                const lblUrl = document.getElementById('lbl-url');
+                lblUrl.innerText = currentStudentUrl;
+                lblUrl.href = currentStudentUrl;
+            })
+            .catch(() => {
+                currentStudentUrl = window.location.origin + "/student";
+                document.getElementById('lbl-url').innerText = currentStudentUrl;
+                document.getElementById('lbl-url').href = currentStudentUrl;
             });
+    }
+
+    // Nút tạo mã QR tự động
+    function taoMaQRTuDong() {
+        if (!currentStudentUrl) khoiTaoDiaChiTruyCap();
+        const container = document.getElementById('qrcode');
+        container.innerHTML = "";
+        document.getElementById('qr-placeholder').style.display = 'none';
+
+        new QRCode(container, {
+            text: currentStudentUrl,
+            width: 160,
+            height: 160,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.H
         });
+    }
 
-        function generateQR() {
-            fetch('/api/get_ip').then(r => r.json()).then(data => {
-                const studentUrl = `http://${data.ip}:${data.port}/student`;
-                document.getElementById('displayIp').innerText = studentUrl;
-                
-                const qrContainer = document.getElementById('qrcode');
-                qrContainer.innerHTML = "";
+    // Tải ngân hàng đề Word (.docx)
+    function uploadFileDe(input) {
+        if (!input.files || input.files.length === 0) return;
+        const formData = new FormData();
+        formData.append("file", input.files[0]);
 
-                // Lấy kích thước thực tế của khung để phóng to gần sát mép viền
-                const parentBox = qrContainer.parentElement;
-                const size = Math.min(parentBox.clientWidth, parentBox.clientHeight) - 16;
+        fetch('/api/upload_bank', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`Đã nhận đề thành công: ${data.total_mcq} câu trắc nghiệm và ${data.total_tf} câu đúng/sai!`);
+                } else {
+                    alert("Lỗi nạp đề: " + data.error);
+                }
+            })
+            .catch(err => alert("Không thể tải file lên!"));
+    }
 
-                new QRCode(qrContainer, {
-                    text: studentUrl,
-                    width: size,
-                    height: size,
-                    correctLevel: QRCode.CorrectLevel.M // Nét dày, sắc nét, quét từ xa cực nhạy
-                });
-            });
+    function moModalCauHinh() {
+        modalConfig.show();
+    }
+
+    function luuCauHinhCaThi() {
+        const payload = {
+            class_name: document.getElementById('cfg-class').value.trim() || "Chưa nhập",
+            num_mcq: parseInt(document.getElementById('cfg-mcq').value) || 0,
+            score_mcq: parseFloat(document.getElementById('cfg-score-mcq').value) || 0,
+            num_tf: parseInt(document.getElementById('cfg-tf').value) || 0,
+            score_tf: parseFloat(document.getElementById('cfg-score-tf').value) || 0,
+            duration: parseInt(document.getElementById('cfg-duration').value) || 15
+        };
+
+        fetch('/api/configure_exam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('lbl-class').innerText = payload.class_name;
+                document.getElementById('lbl-config').innerText = `${payload.num_mcq} câu Trắc nghiệm và ${payload.num_tf} câu Đúng/Sai`;
+                document.getElementById('lbl-duration').innerText = payload.duration;
+                modalConfig.hide();
+                alert("Đã lưu cấu hình và làm sạch danh sách thí sinh cũ!");
+            }
+        });
+    }
+
+    function batDauThi() {
+        socket.emit('teacher_start_exam');
+        const btn = document.getElementById('btn-start');
+        btn.innerText = "Đang diễn ra ca thi...";
+        btn.classList.replace('btn-custom', 'btn-warning');
+        btn.disabled = true;
+    }
+
+    // Đồng bộ danh sách thí sinh thời gian thực
+    socket.on('update_teacher_list', function(students) {
+        document.getElementById('lbl-count').innerText = students.length;
+        const tbody = document.getElementById('student-tbody');
+        tbody.innerHTML = "";
+
+        if (students.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-muted py-3">Chưa có thí sinh kết nối</td></tr>';
+            return;
         }
 
-        function uploadFileBank(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            const formData = new FormData();
-            formData.append('file', file);
+        students.forEach((st, idx) => {
+            const mins = String(Math.floor(st.time_left / 60)).padStart(2, '0');
+            const secs = String(st.time_left % 60).padStart(2, '0');
+            const row = `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td>${st.ip}</td>
+                    <td class="text-start ps-3 fw-bold">${st.name}</td>
+                    <td>${mins}:${secs}</td>
+                    <td class="${st.violations > 0 ? 'text-danger fw-bold' : ''}">${st.violations}</td>
+                    <td><span class="badge ${st.submitted === 'Đã nộp' ? 'bg-success' : 'bg-secondary'}">${st.submitted}</span></td>
+                    <td class="fw-bold fs-6 text-primary">${st.score}</td>
+                </tr>
+            `;
+            tbody.innerHTML += row;
+        });
+    });
 
-            fetch('/api/upload_bank', { method: 'POST', body: formData })
-                .then(r => r.json())
+    // 1. XỬ LÝ NÚT TẠO MỚI: XÓA SẠCH DỮ LIỆU
+    function taoCaThiMoi() {
+        if (confirm("Thầy có chắc chắn muốn làm mới ca thi không?\n(Toàn bộ thí sinh cũ và bài thi cũ sẽ được xóa sạch)")) {
+            fetch('/api/reset_exam', { method: 'POST' })
+                .then(res => res.json())
                 .then(data => {
-                    if (data.success) {
-                        document.getElementById('subBankName').value = data.filename;
-                        document.getElementById('subNumMcq').value = data.total_mcq;
-                        document.getElementById('subNumTf').value = data.total_tf;
-                        calculatePoints();
-
-                        Swal.fire({
-                            icon: 'success',
-                            title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Import thành công !</span>',
-                            html: `<span style="font-size: 14px; color: #4b5563;">Đã nạp <b>${data.total_mcq}</b> câu Trắc nghiệm & <b>${data.total_tf}</b> câu Đúng/Sai</span>`,
-                            confirmButtonColor: '#0b3c6d',
-                            confirmButtonText: 'Đóng',
-                            width: '400px',
-                            padding: '1rem',
-                            customClass: {
-                                confirmButton: 'text-xs px-5 py-1.5 rounded shadow'
-                            }
-                        });
-
-                    } else {
-                        Swal.fire('Lỗi định dạng', data.error, 'error');
-                    }
-                    event.target.value = '';
+                    localStorage.clear();
+                    sessionStorage.clear();
+                    window.location.reload();
+                })
+                .catch(() => {
+                    localStorage.clear();
+                    window.location.reload();
                 });
         }
+    }
 
-        function openSubform() {
-            document.getElementById('subformModal').classList.remove('hidden');
-            calculatePoints();
+    // 2. XỬ LÝ NÚT ĐÓNG: TỰ ĐỘNG ĐÓNG TAB TRÌNH DUYỆT
+    function dongTrangWeb() {
+        if (confirm("Thầy có muốn đóng trang quản lý này không?")) {
+            window.open('', '_self', '');
+            window.close();
+            setTimeout(() => {
+                alert("Trình duyệt đã chặn lệnh đóng tự động. Thầy vui lòng bấm phím Ctrl + W hoặc dấu X trên tab để đóng nhé!");
+            }, 300);
         }
-
-        function calculatePoints() {
-            const nMcq = parseFloat(document.getElementById('subNumMcq').value) || 1;
-            const sMcq = parseFloat(document.getElementById('subScoreMcq').value) || 0;
-            document.getElementById('subPptMcq').value = (sMcq / nMcq).toFixed(3);
-
-            const nTf = parseFloat(document.getElementById('subNumTf').value) || 1;
-            const sTf = parseFloat(document.getElementById('subScoreTf').value) || 0;
-            document.getElementById('subPptTf').value = (sTf / nTf).toFixed(3);
-        }
-
-        function saveSubform() {
-            const payload = {
-                num_mcq: parseInt(document.getElementById('subNumMcq').value) || 0,
-                score_mcq: parseFloat(document.getElementById('subScoreMcq').value) || 0,
-                num_tf: parseInt(document.getElementById('subNumTf').value) || 0,
-                score_tf: parseFloat(document.getElementById('subScoreTf').value) || 0,
-                duration: parseInt(document.getElementById('subDuration').value) || 15,
-                tf_scale: {
-                    "1": (parseFloat(document.getElementById('subTfP1').value) || 0) / 100,
-                    "2": (parseFloat(document.getElementById('subTfP2').value) || 0) / 100,
-                    "3": (parseFloat(document.getElementById('subTfP3').value) || 0) / 100,
-                    "4": (parseFloat(document.getElementById('subTfP4').value) || 0) / 100
-                }
-            };
-
-            fetch('/api/configure_exam', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
-            }).then(() => {
-                document.getElementById('displayNumMcq').innerText = payload.num_mcq;
-                document.getElementById('displayNumTf').innerText = payload.num_tf;
-                document.getElementById('displayDuration').innerText = payload.duration;
-                closeSubform();
-                
-                // CẬP NHẬT SUBFORM: Lưu cấu hình ca thi thành công
-                Swal.fire({
-                    icon: 'success',
-                    title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Lưu thành công !</span>',
-                    html: '<span style="font-size: 14px; color: #4b5563;">Đã lưu cấu hình ca thi vào hệ thống!</span>',
-                    confirmButtonColor: '#0b3c6d',
-                    confirmButtonText: 'Đóng',
-                    width: '400px',
-                    padding: '1rem',
-                    customClass: {
-                        confirmButton: 'text-xs px-5 py-1.5 rounded shadow'
-                    }
-                });
-            });
-        }
-
-        function closeSubform() {
-            document.getElementById('subformModal').classList.add('hidden');
-        }
-
-        function startExam() {
-            socket.emit('teacher_start_exam');
-            const btn = document.getElementById('btnStartExam');
-            btn.innerText = "Đang diễn ra ca thi...";
-            btn.disabled = true;
-
-            Swal.fire({
-                icon: 'info',
-                title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Đã bắt đầu !</span>',
-                html: '<span style="font-size: 14px; color: #4b5563;">Học sinh kết nối trước, trong hay sau đều sẽ tự động nhận đề!</span>',
-                confirmButtonColor: '#0b3c6d',
-                confirmButtonText: 'Đóng',
-                width: '400px',
-                padding: '1rem',
-                customClass: {
-                    confirmButton: 'text-xs px-5 py-1.5 rounded shadow'
-                }
-            });
-
-            // Đếm ngược tự động chuyển sang Hết giờ làm bài
-            const durationMinutes = parseInt(document.getElementById('displayDuration').innerText) || 15;
-            let totalSeconds = durationMinutes * 60;
-
-            if (examCountdownTimer) clearInterval(examCountdownTimer);
-
-            examCountdownTimer = setInterval(() => {
-                totalSeconds--;
-                if (totalSeconds <= 0) {
-                    clearInterval(examCountdownTimer);
-                    btn.innerText = "Hết giờ làm bài";
-                    
-                    // CẬP NHẬT SUBFORM: Thông báo hết giờ làm bài
-                    Swal.fire({
-                        icon: 'warning',
-                        title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Hết giờ làm bài !</span>',
-                        html: '<span style="font-size: 14px; color: #4b5563;">Ca thi đã kết thúc. Hệ thống đã tự động thu và lưu bài làm của tất cả thí sinh.</span>',
-                        confirmButtonColor: '#0b3c6d',
-                        confirmButtonText: 'Đóng',
-                        width: '400px',
-                        padding: '1rem',
-                        customClass: {
-                            confirmButton: 'text-xs px-5 py-1.5 rounded shadow'
-                        }
-                    });
-                }
-            }, 1000);
-        }
-
-        function exportExcelResult() {
-            window.location.href = '/api/export_excel';
-        }
-
-        socket.on('update_teacher_list', (students) => {
-            document.getElementById('onlineCount').innerText = students.length;
-            const tbody = document.getElementById('studentTableBody');
-            tbody.innerHTML = '';
-            students.forEach((st, idx) => {
-                const tr = document.createElement('tr');
-                tr.className = "text-center border-b hover:bg-gray-50";
-                const mins = Math.floor(st.time_left / 60);
-                const secs = st.time_left % 60;
-                const timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                tr.innerHTML = `
-                    <td class="py-2 border">${idx + 1}</td>
-                    <td class="py-2 border font-mono">${st.ip}</td>
-                    <td class="py-2 border font-semibold text-left px-2">${st.name}</td>
-                    <td class="py-2 border font-mono font-bold navy-text">${timeStr}</td>
-                    <td class="py-2 border font-bold ${st.violations > 0 ? 'text-red-600' : ''}">${st.violations}</td>
-                    <td class="py-2 border navy-text">${st.submitted}</td>
-	    <td class="border border-gray-300 py-1 px-2 font-bold text-gray-900">${st.score !== undefined ? st.score : 0.0}</td>
-                   
-                `;
-                tbody.appendChild(tr);
-            });
-        });
-    </script>
+    }
+</script>
 </body>
 </html>
