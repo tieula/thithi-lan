@@ -290,19 +290,16 @@ def save_individual_submission(st, answers, score):
     NL = "\r\n"
 
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write("============================================================" + NL)
         f.write(f"BÀI LÀM THÍ SINH: {st['name']}" + NL)
         f.write(f"Địa chỉ IP      : {st['ip']}" + NL)
         f.write(f"Trạng thái      : {st['submitted']}" + NL)
         f.write(f"Số lần vi phạm  : {st['violations']}" + NL)
         f.write(f"ĐIỂM TỔNG KẾT   : {score} điểm" + NL)
-        f.write("============================================================" + NL + NL)
+        f.write("--------------------------------------------------------" + NL + NL)
 
         # --- PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN ---
-        f.write("============================================================" + NL)
         f.write("--- PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN ---" + NL)
-        f.write("============================================================" + NL + NL)
-        
+        f.write("--------------------------------------------------------" + NL + NL)
         mcq_list = exam_data.get("mcq", [])
         for idx, q in enumerate(mcq_list, 1):
             ans = answers.get(f"mcq_{q['id']}", "Chưa làm")
@@ -312,16 +309,14 @@ def save_individual_submission(st, answers, score):
             for opt in q['options']:
                 mark = "[ĐÚNG]" if opt.get('correct') else "      "
                 f.write(f"   {mark} {opt['key']}. {opt['text']}" + NL)
-            
-            f.write(f"   --------------------------------------------------------" + NL)
             f.write(f"   ==> Thí sinh chọn : {ans}" + NL)
             f.write(f"   ==> Đáp án đề gốc : {correct_opt}" + NL)
             f.write(NL)
 
         # --- PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI ---
-        f.write(NL + "============================================================" + NL)
+
         f.write("--- PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI ---" + NL)
-        f.write("============================================================" + NL + NL)
+        f.write("--------------------------------------------------------" + NL + NL)
 
         tf_list = exam_data.get("tf", [])
         for idx, q in enumerate(tf_list, 1):
