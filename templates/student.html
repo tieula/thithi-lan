@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
@@ -10,7 +10,6 @@
     <script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
    
     <script src="{{ url_for('static', filename='sweetalert2.all.min.js') }}"></script>
-
 
     <style>
         * { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -86,16 +85,32 @@
     </div>
 
     <script>
-        const socket = io();
+        // Cấu hình Socket tự động tái kết nối bền bỉ trên mạng di động 4G
+        const socket = io({
+            reconnection: true,
+            reconnectionAttempts: 15,
+            reconnectionDelay: 1000,
+            timeout: 10000
+        });
+
+        let currentStudentName = "";
         let studentAnswers = {};
         let timerInterval = null;
         let timeLeft = 0;
         let isSubmitted = false;
         let isExamActive = false;
 
+        // Khôi phục tên thí sinh nếu học sinh lỡ tải lại trang
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedName = sessionStorage.getItem('lan_exam_student_name');
+            if (savedName) {
+                document.getElementById('studentName').value = savedName;
+            }
+        });
+
         function joinExam() {
-            const name = document.getElementById('studentName').value.trim();
-            if (!name) {
+            const nameInput = document.getElementById('studentName').value.trim();
+            if (!nameInput) {
                 Swal.fire({
                     icon: 'warning',
                     title: 'Lỗi',
@@ -105,12 +120,23 @@
                 });
                 return;
             }
-            document.getElementById('headerStudentName').innerText = name;
-            socket.emit('join_student', { name: name });
+
+            currentStudentName = nameInput;
+            sessionStorage.setItem('lan_exam_student_name', currentStudentName);
+            document.getElementById('headerStudentName').innerText = currentStudentName;
+
+            socket.emit('join_student', { name: currentStudentName });
 
             document.getElementById('loginScreen').classList.add('hidden');
             document.getElementById('waitingScreen').classList.remove('hidden');
         }
+
+        // Tự động kết nối lại khi 4G chập chờn hoặc mở lại màn hình điện thoại
+        socket.on('connect', () => {
+            if (currentStudentName && !isSubmitted) {
+                socket.emit('join_student', { name: currentStudentName });
+            }
+        });
 
         // Chặn thi lần 2 khi nhận tín hiệu từ Server
         socket.on('exam_blocked', (data) => {
@@ -148,7 +174,6 @@
             startCountdown();
         });
 
-        // Hàm làm sạch chuỗi câu hỏi, loại bỏ chữ "Câu X:" cũ để đánh số thứ tự mới
         function cleanQuestionTitle(text) {
             if (!text) return "";
             return text.replace(/^(câu\s*\d+[\s\:\.\-\)]*)\s*/i, '').trim();
@@ -169,7 +194,6 @@
                     const card = document.createElement('div');
                     card.className = "bg-white p-4 rounded-lg shadow-sm border border-gray-200 space-y-3";
 
-                    // Đánh số thứ tự liên tục 1, 2, 3...
                     const cleanText = cleanQuestionTitle(q.question);
                     const qText = `Câu ${idx + 1}: ${cleanText}`;
                     card.innerHTML = `<div class="font-semibold text-gray-900">${qText}</div>`;
@@ -200,7 +224,6 @@
                     const card = document.createElement('div');
                     card.className = "bg-white p-4 rounded-lg shadow-sm border border-gray-200 space-y-3";
 
-                    // Đánh số thứ tự liên tục 1, 2, 3...
                     const cleanTextTf = cleanQuestionTitle(q.question);
                     const qTfText = `Câu ${idx + 1}: ${cleanTextTf}`;
                     card.innerHTML = `<div class="font-semibold text-gray-900">${qTfText}</div>`;
@@ -230,14 +253,12 @@
             }
         }
 
-        // Chọn trắc nghiệm: Lưu cục bộ và đồng bộ tức thời lên Server
         function selectMcq(qId, key) {
             if (isSubmitted) return;
             studentAnswers[`mcq_${qId}`] = key;
             socket.emit('sync_answer', { key: `mcq_${qId}`, val: key });
         }
 
-        // Chọn Đúng/Sai: Lưu cục bộ và đồng bộ tức thời lên Server
         function selectTf(qId, subKey, val) {
             if (isSubmitted) return;
             studentAnswers[`tf_${qId}_${subKey}`] = val;
@@ -287,7 +308,6 @@
             });
         }
 
-        // Tự động nộp khi hết giờ: Nộp bài lên Server trước rồi mới hiển thị thông báo
         function autoSubmitOnTimeUp() {
             if (isSubmitted) return;
             doSubmit();
@@ -302,26 +322,46 @@
             });
         }
 
+        // HÀM NỘP BÀI AN TOÀN TUYỆT ĐỐI (GỬI KÈM TÊN THÍ SINH VÀ PHÒNG THỦ KẾT NỐI)
         function doSubmit() {
             if (isSubmitted) return;
             isSubmitted = true;
             isExamActive = false;
             if (timerInterval) clearInterval(timerInterval);
 
-            // Chuyển trạng thái nút nộp
+            // Khóa nút nộp bài
             const btn = document.getElementById('btnSubmit');
-            btn.innerText = "Đã nộp bài";
+            btn.innerText = "Đang nộp bài...";
             btn.disabled = true;
             btn.classList.replace('bg-green-700', 'bg-gray-500');
             btn.classList.replace('hover:bg-green-800', 'cursor-not-allowed');
 
-            // Khóa toàn bộ lựa chọn radio
+            // Khóa tất cả các nút radio
             document.querySelectorAll('input[type="radio"]').forEach(el => el.disabled = true);
 
-            // Gửi dữ liệu nộp bài chính thức
-            socket.emit('submit_exam', studentAnswers);
+            const submissionPayload = {
+                name: currentStudentName || document.getElementById('headerStudentName').innerText,
+                answers: studentAnswers
+            };
+
+            // 1. Gửi qua kênh WebSocket chính thức
+            socket.emit('submit_exam', submissionPayload);
+
+            // 2. Chuyển chữ nút sau khi phát lệnh nộp
+            btn.innerText = "Đã nộp bài";
+
+            // Hiển thị vòng chờ chấm điểm
+            Swal.fire({
+                title: 'Đang xử lý nộp bài...',
+                text: 'Vui lòng đợi hệ thống ghi nhận điểm số của bạn.',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
         }
 
+        // Nhận kết quả điểm từ máy chủ và hiển thị rõ ràng cho học sinh
         socket.on('exam_finished_ack', (data) => {
             Swal.fire({
                 title: 'Hoàn thành bài thi!',
@@ -333,7 +373,17 @@
             });
         });
 
-        // BỘ GIÁM SÁT GIAN LẬN: Bắt khi ẩn trang, chuyển tab, mất focus, thu nhỏ
+        // Bắt sự kiện học sinh lỡ đóng tab/thoát trang khi đang thi để thu bài tự động
+        window.addEventListener('beforeunload', () => {
+            if (isExamActive && !isSubmitted) {
+                socket.emit('submit_exam', {
+                    name: currentStudentName || document.getElementById('headerStudentName').innerText,
+                    answers: studentAnswers
+                });
+            }
+        });
+
+        // GIÁM SÁT VI PHẠM (Chỉ cảnh báo, không làm treo bài thi)
         function recordViolation() {
             if (isExamActive && !isSubmitted) {
                 socket.emit('report_violation');
@@ -343,7 +393,7 @@
                     text: 'Hệ thống đã ghi nhận hành vi rời khỏi màn hình bài thi!',
                     confirmButtonColor: '#0b3c6d',
                     confirmButtonText: 'Quay lại làm bài',
-                    timer: 3000
+                    timer: 2500
                 });
             }
         }
@@ -352,14 +402,6 @@
             if (document.hidden) {
                 recordViolation();
             }
-        });
-
-        window.addEventListener('blur', () => {
-            recordViolation();
-        });
-
-        window.addEventListener('pagehide', () => {
-            recordViolation();
         });
     </script>
 </body>
