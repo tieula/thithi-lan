@@ -295,29 +295,26 @@ def save_individual_submission(st, answers, score):
         f.write(f"Trạng thái      : {st['submitted']}" + NL)
         f.write(f"Số lần vi phạm  : {st['violations']}" + NL)
         f.write(f"ĐIỂM TỔNG KẾT   : {score} điểm" + NL)
-        f.write("--------------------------------------------------------" + NL + NL)
-
+  
         # --- PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN ---
-        f.write("--- PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN ---" + NL)
+        f.write("PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN" + NL)
         f.write("--------------------------------------------------------" + NL + NL)
         mcq_list = exam_data.get("mcq", [])
         for idx, q in enumerate(mcq_list, 1):
             ans = answers.get(f"mcq_{q['id']}", "Chưa làm")
             correct_opt = next((opt['key'] for opt in q['options'] if opt.get('correct')), "Chưa rõ")
-
             f.write(f"Câu {idx}: {q['question']}" + NL)
             for opt in q['options']:
                 mark = "[ĐÚNG]" if opt.get('correct') else "      "
                 f.write(f"   {mark} {opt['key']}. {opt['text']}" + NL)
-            f.write(f"   ==> Thí sinh chọn : {ans}" + NL)
-            f.write(f"   ==> Đáp án đề gốc : {correct_opt}" + NL)
+            f.write(f"   Thí sinh : {ans}" + NL)
+            f.write(f"   Đáp án : {correct_opt}" + NL)
             f.write(NL)
 
         # --- PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI ---
 
-        f.write("--- PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI ---" + NL)
-        f.write("--------------------------------------------------------" + NL + NL)
-
+        f.write(" PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI" + NL)
+        f.write("---------------------------------------------" + NL + NL)
         tf_list = exam_data.get("tf", [])
         for idx, q in enumerate(tf_list, 1):
             f.write(f"Câu {idx}: {q['question']}" + NL)
@@ -325,8 +322,8 @@ def save_individual_submission(st, answers, score):
                 user_val = answers.get(f"tf_{q['id']}_{sub['key']}", "Chưa làm")
                 expected = "Đ" if sub.get('correct') else "S"
                 f.write(f"   {sub['key']}) {sub['text']}" + NL)
-                f.write(f"       + Thí sinh chọn : {user_val}" + NL)
-                f.write(f"       + Đáp án đề gốc : {expected}" + NL)
+                f.write(f"  Thí sinh : {user_val}" + NL)
+                f.write(f"  Đáp án : {expected}" + NL)
             f.write(NL)
 
 def process_grading(sid, answers=None, student_name=None):
