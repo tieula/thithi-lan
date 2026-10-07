@@ -286,36 +286,53 @@ def save_individual_submission(st, answers, score):
 
     exam_data = st.get("exam", exam_state["raw_bank"])
 
+    # Dùng chuẩn xuống dòng \r\n để Notepad hiển thị chuẩn từng dòng
+    NL = "\r\n"
+
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write("=" * 60 + "\n")
-        f.write(f"BÀI LÀM THÍ SINH - {st['name']}\n")
-        f.write(f"Địa chỉ IP : {st['ip']}\n")
-        f.write(f"Trạng thái : {st['submitted']}\n")
-        f.write(f"Số lần vi phạm: {st['violations']}\n")
-        f.write(f"ĐIỂM TỔNG KẾT: {score}\n")
-        f.write("=" * 60 + "\n\n")
+        f.write("============================================================" + NL)
+        f.write(f"BÀI LÀM THÍ SINH: {st['name']}" + NL)
+        f.write(f"Địa chỉ IP      : {st['ip']}" + NL)
+        f.write(f"Trạng thái      : {st['submitted']}" + NL)
+        f.write(f"Số lần vi phạm  : {st['violations']}" + NL)
+        f.write(f"ĐIỂM TỔNG KẾT   : {score} điểm" + NL)
+        f.write("============================================================" + NL + NL)
 
-        f.write("--- PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN ---\n")
+        # --- PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN ---
+        f.write("============================================================" + NL)
+        f.write("--- PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN ---" + NL)
+        f.write("============================================================" + NL + NL)
+        
         mcq_list = exam_data.get("mcq", [])
-        for q in mcq_list:
+        for idx, q in enumerate(mcq_list, 1):
             ans = answers.get(f"mcq_{q['id']}", "Chưa làm")
-            correct_opt = next((opt['key'] for opt in q['options'] if opt.get('correct')), "")
-            f.write(f"Câu {q['id']}: {q['question']}\n")
-            for opt in q['options']:
-                mark = "(#)" if opt.get('correct') else "    "
-                f.write(f"   {mark} {opt['key']}. {opt['text']}\n")
-            f.write(f"   => Thí sinh chọn: {ans} | Đáp án đúng: {correct_opt}\n\n")
+            correct_opt = next((opt['key'] for opt in q['options'] if opt.get('correct')), "Chưa rõ")
 
-        f.write("\n--- PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI ---\n")
+            f.write(f"Câu {idx}: {q['question']}" + NL)
+            for opt in q['options']:
+                mark = "[ĐÚNG]" if opt.get('correct') else "      "
+                f.write(f"   {mark} {opt['key']}. {opt['text']}" + NL)
+            
+            f.write(f"   --------------------------------------------------------" + NL)
+            f.write(f"   ==> Thí sinh chọn : {ans}" + NL)
+            f.write(f"   ==> Đáp án đề gốc : {correct_opt}" + NL)
+            f.write(NL)
+
+        # --- PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI ---
+        f.write(NL + "============================================================" + NL)
+        f.write("--- PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI ---" + NL)
+        f.write("============================================================" + NL + NL)
+
         tf_list = exam_data.get("tf", [])
-        for q in tf_list:
-            f.write(f"Câu {q['id']}: {q['question']}\n")
+        for idx, q in enumerate(tf_list, 1):
+            f.write(f"Câu {idx}: {q['question']}" + NL)
             for sub in q.get('sub_items', []):
                 user_val = answers.get(f"tf_{q['id']}_{sub['key']}", "Chưa làm")
                 expected = "Đ" if sub.get('correct') else "S"
-                f.write(f"   {sub['key']}) {sub['text']}\n")
-                f.write(f"      => Thí sinh chọn: {user_val} | Đáp án đúng: {expected}\n")
-            f.write("\n")
+                f.write(f"   {sub['key']}) {sub['text']}" + NL)
+                f.write(f"       + Thí sinh chọn : {user_val}" + NL)
+                f.write(f"       + Đáp án đề gốc : {expected}" + NL)
+            f.write(NL)
 
 def process_grading(sid, answers=None, student_name=None):
     st = None
