@@ -6,9 +6,7 @@
     <title>Học sinh làm bài thi</title>
 
     <script src="{{ url_for('static', filename='tailwind.js') }}"></script>
-    
     <script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
-   
     <script src="{{ url_for('static', filename='sweetalert2.all.min.js') }}"></script>
 
     <style>
@@ -17,7 +15,6 @@
         .navy-btn { background-color: #0b3c6d; color: #ffffff; }
         .navy-btn:hover { background-color: #082d52; }
 
-        /* Đổi màu icon SweetAlert2 sang Navy đồng bộ */
         .swal2-icon.swal2-success {
             border-color: #0b3c6d !important;
         }
@@ -59,7 +56,7 @@
 
     <!-- 3. MÀN HÌNH LÀM BÀI -->
     <div id="examScreen" class="hidden flex-1 flex flex-col">
-        <!-- HEADER CỐ ĐỊNH: ĐỒNG HỒ ĐẾM NGƯỢC (PHÚT : GIÂY) -->
+        <!-- HEADER CỐ ĐỊNH -->
         <header class="navy-header text-white px-4 py-3 sticky top-0 z-30 shadow flex justify-between items-center">
             <div>
                 <span class="text-xs text-gray-300 block">Thí sinh:</span>
@@ -73,7 +70,6 @@
 
         <!-- KHUNG DANH SÁCH CÂU HỎI -->
         <main class="flex-1 max-w-2xl w-full mx-auto p-4 space-y-6 pb-24" id="questionsContainer">
-            <!-- Render câu hỏi động qua JS -->
         </main>
 
         <!-- FOOTER NỘP BÀI -->
@@ -85,10 +81,9 @@
     </div>
 
     <script>
-        // Cấu hình Socket tự động tái kết nối bền bỉ trên mạng di động 4G
         const socket = io({
             reconnection: true,
-            reconnectionAttempts: 15,
+            reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             timeout: 10000
         });
@@ -96,11 +91,11 @@
         let currentStudentName = "";
         let studentAnswers = {};
         let timerInterval = null;
-        let timeLeft = 0;
+        let targetEndTime = null;
         let isSubmitted = false;
         let isExamActive = false;
+        let retryInterval = null;
 
-        // Khôi phục tên thí sinh nếu học sinh lỡ tải lại trang
         window.addEventListener('DOMContentLoaded', () => {
             const savedName = sessionStorage.getItem('lan_exam_student_name');
             if (savedName) {
@@ -131,14 +126,12 @@
             document.getElementById('waitingScreen').classList.remove('hidden');
         }
 
-        // Tự động kết nối lại khi 4G chập chờn hoặc mở lại màn hình điện thoại
         socket.on('connect', () => {
             if (currentStudentName && !isSubmitted) {
                 socket.emit('join_student', { name: currentStudentName });
             }
         });
 
-        // Chặn thi lần 2 khi nhận tín hiệu từ Server
         socket.on('exam_blocked', (data) => {
             Swal.fire({
                 icon: 'warning',
@@ -159,7 +152,6 @@
             });
         });
 
-        // Nhận đề thi (áp dụng cho cả thí sinh vào trước và vào sau)
         socket.on('start_exam_now', (payload) => {
             if (isSubmitted) return;
             isExamActive = true;
@@ -170,7 +162,8 @@
 
             renderQuestions(payload.mcq, payload.tf);
 
-            timeLeft = payload.time_left !== undefined ? payload.time_left : (payload.duration * 60);
+            const durationSec = payload.time_left !== undefined ? payload.time_left : (payload.duration * 60);
+            targetEndTime = Date.now() + (durationSec * 1000);
             startCountdown();
         });
 
@@ -183,7 +176,6 @@
             const container = document.getElementById('questionsContainer');
             container.innerHTML = '';
 
-            // 1. Render Phần 1: MCQ
             if (mcqs && mcqs.length > 0) {
                 const header1 = document.createElement('div');
                 header1.className = "font-bold text-sm text-blue-900 border-b-2 border-blue-900 pb-1";
@@ -193,10 +185,8 @@
                 mcqs.forEach((q, idx) => {
                     const card = document.createElement('div');
                     card.className = "bg-white p-4 rounded-lg shadow-sm border border-gray-200 space-y-3";
-
                     const cleanText = cleanQuestionTitle(q.question);
-                    const qText = `Câu ${idx + 1}: ${cleanText}`;
-                    card.innerHTML = `<div class="font-semibold text-gray-900">${qText}</div>`;
+                    card.innerHTML = `<div class="font-semibold text-gray-900">Câu ${idx + 1}: ${cleanText}</div>`;
 
                     const optsDiv = document.createElement('div');
                     optsDiv.className = "space-y-2";
@@ -213,7 +203,6 @@
                 });
             }
 
-            // 2. Render Phần 2: True/False
             if (tfs && tfs.length > 0) {
                 const header2 = document.createElement('div');
                 header2.className = "font-bold text-sm text-blue-900 border-b-2 border-blue-900 pb-1 mt-6";
@@ -223,10 +212,8 @@
                 tfs.forEach((q, idx) => {
                     const card = document.createElement('div');
                     card.className = "bg-white p-4 rounded-lg shadow-sm border border-gray-200 space-y-3";
-
                     const cleanTextTf = cleanQuestionTitle(q.question);
-                    const qTfText = `Câu ${idx + 1}: ${cleanTextTf}`;
-                    card.innerHTML = `<div class="font-semibold text-gray-900">${qTfText}</div>`;
+                    card.innerHTML = `<div class="font-semibold text-gray-900">Câu ${idx + 1}: ${cleanTextTf}</div>`;
 
                     const subDiv = document.createElement('div');
                     subDiv.className = "space-y-3";
@@ -267,25 +254,30 @@
 
         function startCountdown() {
             if (timerInterval) clearInterval(timerInterval);
-            updateTimerDisplay();
 
-            timerInterval = setInterval(() => {
-                if (timeLeft > 0) {
-                    timeLeft--;
-                    updateTimerDisplay();
-                    if (timeLeft % 5 === 0) {
-                        socket.emit('sync_timer', { time_left: timeLeft });
-                    }
-                } else {
+            const checkTime = () => {
+                const now = Date.now();
+                const diff = Math.max(0, Math.ceil((targetEndTime - now) / 1000));
+
+                updateTimerDisplay(diff);
+
+                if (diff % 5 === 0 && diff > 0) {
+                    socket.emit('sync_timer', { time_left: diff });
+                }
+
+                if (diff <= 0) {
                     clearInterval(timerInterval);
                     autoSubmitOnTimeUp();
                 }
-            }, 1000);
+            };
+
+            checkTime();
+            timerInterval = setInterval(checkTime, 1000);
         }
 
-        function updateTimerDisplay() {
-            const minutes = Math.floor(timeLeft / 60);
-            const seconds = timeLeft % 60;
+        function updateTimerDisplay(secondsLeft) {
+            const minutes = Math.floor(secondsLeft / 60);
+            const seconds = secondsLeft % 60;
             document.getElementById('countdownTimer').innerText = 
                 `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }
@@ -322,21 +314,18 @@
             });
         }
 
-        // HÀM NỘP BÀI AN TOÀN TUYỆT ĐỐI (GỬI KÈM TÊN THÍ SINH VÀ PHÒNG THỦ KẾT NỐI)
         function doSubmit() {
             if (isSubmitted) return;
             isSubmitted = true;
             isExamActive = false;
             if (timerInterval) clearInterval(timerInterval);
 
-            // Khóa nút nộp bài
             const btn = document.getElementById('btnSubmit');
             btn.innerText = "Đang nộp bài...";
             btn.disabled = true;
             btn.classList.replace('bg-green-700', 'bg-gray-500');
             btn.classList.replace('hover:bg-green-800', 'cursor-not-allowed');
 
-            // Khóa tất cả các nút radio
             document.querySelectorAll('input[type="radio"]').forEach(el => el.disabled = true);
 
             const submissionPayload = {
@@ -344,13 +333,17 @@
                 answers: studentAnswers
             };
 
-            // 1. Gửi qua kênh WebSocket chính thức
-            socket.emit('submit_exam', submissionPayload);
+            const send = () => {
+                if (socket.connected) {
+                    socket.emit('submit_exam', submissionPayload);
+                }
+            };
 
-            // 2. Chuyển chữ nút sau khi phát lệnh nộp
-            btn.innerText = "Đã nộp bài";
+            send();
 
-            // Hiển thị vòng chờ chấm điểm
+            // Thử gửi lại định kỳ nếu máy chủ chưa xác nhận
+            retryInterval = setInterval(send, 2000);
+
             Swal.fire({
                 title: 'Đang xử lý nộp bài...',
                 text: 'Vui lòng đợi hệ thống ghi nhận điểm số của bạn.',
@@ -361,8 +354,15 @@
             });
         }
 
-        // Nhận kết quả điểm từ máy chủ và hiển thị rõ ràng cho học sinh
         socket.on('exam_finished_ack', (data) => {
+            if (retryInterval) {
+                clearInterval(retryInterval);
+                retryInterval = null;
+            }
+
+            const btn = document.getElementById('btnSubmit');
+            if (btn) btn.innerText = "Đã nộp bài";
+
             Swal.fire({
                 title: 'Hoàn thành bài thi!',
                 text: `Điểm số của bạn: ${data.score} điểm`,
@@ -373,7 +373,6 @@
             });
         });
 
-        // Bắt sự kiện học sinh lỡ đóng tab/thoát trang khi đang thi để thu bài tự động
         window.addEventListener('beforeunload', () => {
             if (isExamActive && !isSubmitted) {
                 socket.emit('submit_exam', {
@@ -383,7 +382,6 @@
             }
         });
 
-        // GIÁM SÁT VI PHẠM (Chỉ cảnh báo, không làm treo bài thi)
         function recordViolation() {
             if (isExamActive && !isSubmitted) {
                 socket.emit('report_violation');
@@ -401,6 +399,13 @@
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 recordViolation();
+            } else {
+                if (isExamActive && !isSubmitted && targetEndTime) {
+                    if (Date.now() >= targetEndTime) {
+                        if (timerInterval) clearInterval(timerInterval);
+                        autoSubmitOnTimeUp();
+                    }
+                }
             }
         });
     </script>
