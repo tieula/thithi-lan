@@ -27,7 +27,7 @@ for d in [SUBMISSION_DIR, UPLOAD_DIR]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-submitted_ips = set()  # Lưu danh sách IP đã nộp bài để chặn thi lần 2
+submitted_ips = set()
 
 exam_state = {
     "class_name": "",
@@ -45,11 +45,46 @@ exam_state = {
         "start_time": None
     },
     "payload": None,
-    "students": {}  # sid -> {ip, name, time_left, violations, submitted, score, answers, exam}
+    "students": {}
 }
 
+# --- TIẾN TRÌNH TỰ ĐỘNG CHỐT BÀI PHÍA MÁY CHỦ KHI HẾT GIỜ ---
+def auto_exam_watcher():
+    """Tự động kiểm tra mỗi giây: nếu hết giờ thì tự chốt điểm ngay lập tức"""
+    while True:
+        eventlet.sleep(1)
+        active = exam_state["active_exam"]
+        if active["status"] == "running" and active["start_time"]:
+            elapsed = time.time() - active["start_time"]
+            total_duration = active["duration"] * 60
+
+            # Cập nhật time_left chung của ca thi
+            remaining = max(0, int(total_duration - elapsed))
+
+            # Cho phép trễ 3 giây bù mạng trước khi tự động chốt bài
+            if elapsed >= total_duration + 3:
+                has_updates = False
+                # Quét tất cả học sinh chưa nộp bài
+                for sid, st in list(exam_state["students"].items()):
+                    if st.get("submitted") != "Đã nộp":
+                        st["time_left"] = 0
+                        process_grading(sid, st.get("answers", {}), st.get("name"))
+                        has_updates = True
+
+                if has_updates:
+                    active["status"] = "finished"
+                    socketio.emit('update_teacher_list', list(exam_state["students"].values()))
+
+eventlet.spawn(auto_exam_watcher)
+
+
+def get_client_ip(req):
+    """Lấy đúng địa chỉ IP của thí sinh khi chạy sau proxy của Render"""
+    if req.headers.get('X-Forwarded-For'):
+        return req.headers.get('X-Forwarded-For').split(',')[0].strip()
+    return req.remote_addr or '127.0.0.1'
+
 def get_base_url():
-    """Tự động ưu tiên domain Render khi chạy online để tạo QR chuẩn xác"""
     render_url = os.environ.get('RENDER_EXTERNAL_URL')
     if render_url:
         return render_url.rstrip('/')
@@ -64,13 +99,11 @@ def get_base_url():
     return f"http://{ip}:5000"
 
 def clean_question_text(raw_text):
-    """Gọt sạch tiền tố 'Câu 1:', 'Câu 15.', 'Câu 48:' cũ trong văn bản ngân hàng đề"""
     if not raw_text:
         return ""
     return re.sub(r'^(câu\s*\d+[\s\:\.\-\)]*)\s*', '', raw_text.strip(), flags=re.IGNORECASE)
 
 def generate_individual_exam():
-    """Tạo đề thi ngẫu nhiên riêng cho từng thí sinh"""
     num_mcq = min(exam_state["active_exam"]["num_mcq"], len(exam_state["raw_bank"]["mcq"]))
     num_tf = min(exam_state["active_exam"]["num_tf"], len(exam_state["raw_bank"]["tf"]))
 
@@ -142,7 +175,6 @@ def generate_individual_exam():
     return client_payload, server_exam
 
 def update_summary_excel():
-    """Tự động cập nhật tệp bảng điểm chung kèm bảng thống kê"""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Bang_Diem_Tong_Hop"
@@ -246,7 +278,6 @@ def update_summary_excel():
     wb.save(summary_path)
 
 def save_individual_submission(st, answers, score):
-    """Xuất file bài làm chi tiết của từng thí sinh"""
     safe_name = re.sub(r'[^\w\s-]', '', st['name']).strip().replace(" ", "_")
     safe_ip = st["ip"].replace(":", "_")
     filename = f"{safe_name}_{safe_ip}.txt"
@@ -286,14 +317,13 @@ def save_individual_submission(st, answers, score):
             f.write("\n")
 
 def process_grading(sid, answers=None, student_name=None):
-    """Hàm nội bộ thực hiện tính điểm, chống mất dấu học sinh khi bị đổi SID lúc nộp bài"""
     st = None
     target_sid = sid
 
     # 1. Tìm thí sinh theo sid hiện tại
     if sid in exam_state["students"]:
         st = exam_state["students"][sid]
-    # 2. Nếu không thấy do rớt mạng đổi sid, tìm theo Tên thí sinh
+    # 2. Tìm theo tên nếu bị đổi sid
     elif student_name:
         for s_id, s_data in exam_state["students"].items():
             if s_data.get("name") == student_name and s_data.get("submitted") != "Đã nộp":
@@ -304,12 +334,13 @@ def process_grading(sid, answers=None, student_name=None):
     if not st:
         return
 
-    # Nếu đã được chấm rồi thì gửi lại điểm về cho client
+    # Nếu đã chấm thì chỉ cần gửi lại ack xác nhận điểm
     if st.get("submitted") == "Đã nộp":
-        emit('exam_finished_ack', {"score": st.get("score", 0.0)}, room=sid)
+        socketio.emit('exam_finished_ack', {"score": st.get("score", 0.0)}, room=sid)
+        if target_sid != sid:
+            socketio.emit('exam_finished_ack', {"score": st.get("score", 0.0)}, room=target_sid)
         return
 
-    # Sử dụng câu trả lời gửi lên; nếu rỗng thì lấy câu trả lời đã đồng bộ thời gian thực
     if not answers and st.get("answers"):
         answers = st["answers"]
     elif not answers:
@@ -317,6 +348,7 @@ def process_grading(sid, answers=None, student_name=None):
 
     st["submitted"] = "Đã nộp"
     st["answers"] = answers
+    st["time_left"] = 0
     submitted_ips.add(st["ip"])
 
     student_exam = st.get("exam")
@@ -347,17 +379,17 @@ def process_grading(sid, answers=None, student_name=None):
         score += tf_pts * ratio
 
     st["score"] = round(score, 2)
-    st["time_left"] = 0
 
     save_individual_submission(st, answers, st["score"])
     update_summary_excel()
 
-    # Cập nhật danh sách bảng giám sát giáo viên ngay lập tức
-    emit('update_teacher_list', list(exam_state["students"].values()), broadcast=True)
-    # Phản hồi báo điểm về cho học sinh
-    emit('exam_finished_ack', {"score": st["score"]}, room=sid)
+    # Cập nhật danh sách giám thị
+    socketio.emit('update_teacher_list', list(exam_state["students"].values()))
+    
+    # Báo điểm về cho học sinh
+    socketio.emit('exam_finished_ack', {"score": st["score"]}, room=sid)
     if target_sid != sid:
-        emit('exam_finished_ack', {"score": st["score"]}, room=target_sid)
+        socketio.emit('exam_finished_ack', {"score": st["score"]}, room=target_sid)
 
 @app.route('/')
 def teacher_dashboard():
@@ -492,7 +524,6 @@ def configure_exam():
 
 @app.route('/api/reset_exam', methods=['POST'])
 def api_reset_exam():
-    """API dọn dẹp sạch toàn bộ dữ liệu ca thi phục vụ nút 'Tạo mới'"""
     global submitted_ips
     submitted_ips.clear()
     exam_state["students"].clear()
@@ -518,7 +549,7 @@ def export_excel():
 @socketio.on('join_student')
 def handle_student_join(data):
     sid = request.sid
-    client_ip = request.remote_addr
+    client_ip = get_client_ip(request)
 
     if client_ip in submitted_ips:
         emit('exam_blocked', {'message': 'Bạn đã thi rồi!'}, room=sid)
@@ -526,7 +557,6 @@ def handle_student_join(data):
 
     name = data.get('name', 'Thí sinh').strip() or 'Thí sinh'
 
-    # Kiểm tra nếu học sinh này đã từng kết nối trước đó (bị rớt mạng vào lại)
     existing_sid = None
     for s_id, s_data in exam_state["students"].items():
         if s_data["name"] == name and s_data["ip"] == client_ip:
@@ -539,7 +569,6 @@ def handle_student_join(data):
         time_left = max(0, time_left - elapsed)
 
     if existing_sid:
-        # Giữ lại bài thi và các câu đã làm của học sinh
         student_record = exam_state["students"].pop(existing_sid)
         student_record["time_left"] = time_left
         exam_state["students"][sid] = student_record
@@ -557,7 +586,6 @@ def handle_student_join(data):
 
     emit('update_teacher_list', list(exam_state["students"].values()), broadcast=True)
 
-    # Nếu ca thi đang chạy, gửi đề ngay cho học sinh
     if exam_state["active_exam"]["status"] == "running":
         if not exam_state["students"][sid].get("exam"):
             client_payload, server_exam = generate_individual_exam()
@@ -565,7 +593,6 @@ def handle_student_join(data):
             client_payload["time_left"] = time_left
             emit('start_exam_now', client_payload, room=sid)
         else:
-            # Gửi lại đề cũ cho em đó làm tiếp
             client_payload = {
                 "mcq": [{"id": q["id"], "type": "mcq", "question": q["question"], "options": [{"key": o["key"], "text": o["text"]} for o in q["options"]]} for q in exam_state["students"][sid]["exam"]["mcq"]],
                 "tf": [{"id": q["id"], "type": "tf", "question": q["question"], "sub_items": [{"key": s["key"], "text": s["text"]} for s in q["sub_items"]]} for q in exam_state["students"][sid]["exam"]["tf"]],
@@ -593,9 +620,6 @@ def handle_timer_sync(data):
 
         if t_left <= 0 and st["submitted"] != "Đã nộp":
             process_grading(sid, st.get("answers", {}), st.get("name"))
-            return
-
-        emit('update_teacher_list', list(exam_state["students"].values()), broadcast=True)
 
 @socketio.on('report_violation')
 def handle_violation():
@@ -633,6 +657,7 @@ def handle_reset_session():
     submitted_ips.clear()
     exam_state["students"].clear()
     exam_state["active_exam"]["status"] = "waiting"
+    exam_state["active_exam"]["start_time"] = None
     emit('update_teacher_list', [], broadcast=True)
 
 if __name__ == '__main__':
