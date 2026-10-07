@@ -7,6 +7,7 @@ import re
 import time
 import random
 import copy
+import zipfile
 from io import BytesIO
 from docx import Document
 from flask import Flask, render_template, request, jsonify, send_file
@@ -544,6 +545,29 @@ def export_excel():
         return send_file(summary_path, as_attachment=True, download_name="Bang_Diem_Tong_Hop.xlsx")
     update_summary_excel()
     return send_file(summary_path, as_attachment=True, download_name="Bang_Diem_Tong_Hop.xlsx")
+
+# --- API NÉN VÀ TẢI TOÀN BỘ KẾT QUẢ (EXCEL + BÀI LÀM) THÀNH FILE ZIP ---
+@app.route('/api/download_all_results', methods=['GET'])
+def download_all_results():
+    """Đóng gói toàn bộ file Excel bảng điểm và tất cả bài làm txt thành file zip"""
+    update_summary_excel()
+    memory_file = BytesIO()
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(SUBMISSION_DIR):
+            for file in files:
+                file_path = os.path.join(root, file)
+                zf.write(file_path, arcname=file)
+
+    memory_file.seek(0)
+    class_name = exam_state.get("class_name", "CaThi").replace(" ", "_")
+    zip_filename = f"KetQua_BaiThi_{class_name}.zip"
+
+    return send_file(
+        memory_file,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=zip_filename
+    )
 
 # --- SOCKET.IO REALTIME EVENTS ---
 @socketio.on('join_student')
