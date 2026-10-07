@@ -30,6 +30,17 @@ for d in [SUBMISSION_DIR, UPLOAD_DIR]:
 
 submitted_ips = set()
 
+def clear_submission_folder():
+    """Xóa sạch toàn bộ các file bài làm .txt và bảng điểm cũ trong thư mục bailamthisinh"""
+    if os.path.exists(SUBMISSION_DIR):
+        for fname in os.listdir(SUBMISSION_DIR):
+            fpath = os.path.join(SUBMISSION_DIR, fname)
+            try:
+                if os.path.isfile(fpath):
+                    os.remove(fpath)
+            except Exception:
+                pass
+
 exam_state = {
     "class_name": "",
     "raw_bank": {"filename": "", "mcq": [], "tf": []},
@@ -59,13 +70,9 @@ def auto_exam_watcher():
             elapsed = time.time() - active["start_time"]
             total_duration = active["duration"] * 60
 
-            # Cập nhật time_left chung của ca thi
-            remaining = max(0, int(total_duration - elapsed))
-
             # Cho phép trễ 3 giây bù mạng trước khi tự động chốt bài
             if elapsed >= total_duration + 3:
                 has_updates = False
-                # Quét tất cả học sinh chưa nộp bài
                 for sid, st in list(exam_state["students"].items()):
                     if st.get("submitted") != "Đã nộp":
                         st["time_left"] = 0
@@ -77,7 +84,6 @@ def auto_exam_watcher():
                     socketio.emit('update_teacher_list', list(exam_state["students"].values()))
 
 eventlet.spawn(auto_exam_watcher)
-
 
 def get_client_ip(req):
     """Lấy đúng địa chỉ IP của thí sinh khi chạy sau proxy của Render"""
@@ -286,7 +292,6 @@ def save_individual_submission(st, answers, score):
 
     exam_data = st.get("exam", exam_state["raw_bank"])
 
-    # Dùng chuẩn xuống dòng \r\n để Notepad hiển thị chuẩn từng dòng
     NL = "\r\n"
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -312,7 +317,6 @@ def save_individual_submission(st, answers, score):
             f.write(NL)
 
         # --- PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI ---
-
         f.write(" PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI" + NL)
         f.write("---------------------------------------------" + NL + NL)
         tf_list = exam_data.get("tf", [])
@@ -322,8 +326,8 @@ def save_individual_submission(st, answers, score):
                 user_val = answers.get(f"tf_{q['id']}_{sub['key']}", "Chưa làm")
                 expected = "Đ" if sub.get('correct') else "S"
                 f.write(f"   {sub['key']}) {sub['text']}" + NL)
-                f.write(f"  Thí sinh : {user_val}" + NL)
-                f.write(f"  Đáp án : {expected}" + NL)
+                f.write(f"   Thí sinh : {user_val}" + NL)
+                f.write(f"   Đáp án : {expected}" + NL)
             f.write(NL)
 
 def process_grading(sid, answers=None, student_name=None):
@@ -509,6 +513,7 @@ def configure_exam():
     global submitted_ips
     submitted_ips.clear()
     exam_state["students"].clear()
+    clear_submission_folder()
 
     data = request.json
     n_mcq = data.get("num_mcq", 0)
@@ -537,6 +542,7 @@ def api_reset_exam():
     global submitted_ips
     submitted_ips.clear()
     exam_state["students"].clear()
+    clear_submission_folder()
     exam_state["class_name"] = ""
     exam_state["active_exam"] = {
         "num_mcq": 0, "score_mcq": 0.0, "score_per_mcq": 0.0,
@@ -673,6 +679,7 @@ def handle_submit(data):
 def teacher_start():
     global submitted_ips
     submitted_ips.clear()
+    clear_submission_folder()  # Dọn sạch các bài thi cũ trước khi ca thi mới bắt đầu
 
     exam_state["active_exam"]["status"] = "running"
     exam_state["active_exam"]["start_time"] = time.time()
@@ -689,6 +696,7 @@ def handle_reset_session():
     global submitted_ips
     submitted_ips.clear()
     exam_state["students"].clear()
+    clear_submission_folder()
     exam_state["active_exam"]["status"] = "waiting"
     exam_state["active_exam"]["start_time"] = None
     emit('update_teacher_list', [], broadcast=True)
