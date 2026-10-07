@@ -290,11 +290,11 @@ def save_individual_submission(st, answers, score):
     NL = "\r\n"
 
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write(f"BÀI LÀM THÍ SINH: {st['name']}" + NL)
-        f.write(f"Địa chỉ IP      : {st['ip']}" + NL)
-        f.write(f"Trạng thái      : {st['submitted']}" + NL)
-        f.write(f"Số lần vi phạm  : {st['violations']}" + NL)
-        f.write(f"ĐIỂM TỔNG KẾT   : {score} điểm" + NL)
+        f.write(f" Họ và tên thí sinh : {st['name']}" + NL)
+        f.write(f" Địa chỉ IP : {st['ip']}" + NL)
+        f.write(f" Trạng thái : {st['submitted']}" + NL)
+        f.write(f" Số lần vi phạm : {st['violations']}" + NL)
+        f.write(f"Tổng điểm : {score} điểm" + NL)
   
         # --- PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN ---
         f.write("PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN" + NL)
