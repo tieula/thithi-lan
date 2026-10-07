@@ -5,13 +5,10 @@
     <title>Hệ thống thi Offline LAN Exam</title>
 
     <script src="{{ url_for('static', filename='tailwind.js') }}"></script>
-    
     <script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
-   
     <script src="{{ url_for('static', filename='sweetalert2.all.min.js') }}"></script>
-
     <script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
-    
+
     <style>
         * { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
         .navy-header { background-color: #0b3c6d; }
@@ -19,7 +16,6 @@
         .navy-btn:hover { background-color: #082d52; }
         .navy-text { color: #0b3c6d; }
 
-        /* Đổi vòng tròn và dấu tích V của SweetAlert2 sang màu Navy */
         .swal2-icon.swal2-success {
             border-color: #0b3c6d !important;
         }
@@ -31,13 +27,11 @@
             border-color: rgba(11, 60, 109, 0.3) !important;
         }
 
-        /* Đổi vòng tròn và chữ i của SweetAlert2 sang màu Navy */
         .swal2-icon.swal2-info {
             border-color: #0b3c6d !important;
             color: #0b3c6d !important;
         }
 
-        /* Đổi vòng tròn và dấu chấm than cảnh báo của SweetAlert2 sang màu Navy */
         .swal2-icon.swal2-warning {
             border-color: #0b3c6d !important;
             color: #0b3c6d !important;
@@ -105,16 +99,16 @@
             </table>
         </div>
 
-        <!-- 2 NÚT DƯỚI CÙNG: TẠO MỚI & ĐÓNG (GIỮ NGUYÊN MÀU NAVY) -->
+        <!-- 2 NÚT DƯỚI CÙNG -->
         <div class="flex justify-end gap-3 mt-4">
             <button onclick="taoCaThiMoi()" class="navy-btn font-semibold py-1.5 px-6 rounded text-sm transition">Tạo mới</button>
             <button onclick="dongTrangWeb()" class="navy-btn font-semibold py-1.5 px-6 rounded text-sm transition">Đóng</button>
         </div>
     </div>
 
-<footer class="text-center py-2 text-xs text-gray-700 font-semibold border-t bg-gray-200">
-    © 2026 - Tác giả: Dương Hồng Hải – THPT Tiểu La – TP Đà Nẵng
-</footer>
+    <footer class="text-center py-2 text-xs text-gray-700 font-semibold border-t bg-gray-200">
+        © 2026 - Tác giả: Dương Hồng Hải – THPT Tiểu La – TP Đà Nẵng
+    </footer>
 
     <!-- MODAL CẤU HÌNH -->
     <div id="subformModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center p-3 z-50">
@@ -229,7 +223,6 @@
         let examCountdownTimer = null;
 
         window.addEventListener('DOMContentLoaded', () => {
-            // Tự động khởi tạo đường dẫn học sinh chuẩn theo tên miền hiện tại
             khoiTaoDuongDanHocSinh();
 
             Swal.fire({
@@ -458,11 +451,26 @@
             }, 1000);
         }
 
+        // TẢI TRỌN GÓI: FILE EXCEL BẢNG ĐIỂM + TOÀN BỘ FILE BÀI LÀM THÍ SINH DƯỚI DẠNG FILE ZIP
         function exportExcelResult() {
-            window.location.href = '/api/export_excel';
+            Swal.fire({
+                title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Đang đóng gói kết quả...</span>',
+                html: '<span style="font-size: 13px; color: #4b5563;">Hệ thống đang nén bảng điểm Excel và bài làm của thí sinh vào tệp ZIP.</span>',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+
+            // Tự động tải file nén kết quả
+            window.location.href = '/api/download_all_results';
+
+            setTimeout(() => {
+                Swal.close();
+            }, 2000);
         }
 
-        // 1. HÀM TẠO CA THI MỚI (Reset dữ liệu server và làm sạch bảng)
+        // HÀM TẠO CA THI MỚI
         function taoCaThiMoi() {
             Swal.fire({
                 title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Tạo mới ca thi?</span>',
@@ -491,7 +499,7 @@
             });
         }
 
-        // 2. HÀM ĐÓNG TRANG WEB
+        // HÀM ĐÓNG TRANG WEB
         function dongTrangWeb() {
             Swal.fire({
                 title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Đóng hệ thống?</span>',
@@ -542,7 +550,6 @@
                 const secs = st.time_left % 60;
                 const timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
                 
-                // Đổi màu trạng thái: Đã nộp hiện màu xanh lá đậm
                 const isSubmitted = st.submitted === "Đã nộp";
                 const submitBadge = isSubmitted 
                     ? `<span class="text-green-600 font-bold">Đã nộp</span>` 
