@@ -62,7 +62,7 @@
                 <h2 class="text-center font-bold text-gray-800 tracking-wide text-base">THÔNG TIN CA THI & CẤU HÌNH ĐỀ</h2>
                 <div class="space-y-1 mt-2">
                     <div>• Lớp : <span id="displayClass" class="navy-text font-semibold">Chưa nhập</span> &nbsp; Đã vào phòng : <span id="onlineCount" class="navy-text font-semibold">0</span> thí sinh</div>
-                    <div>• Địa chỉ truy cập : <span id="displayIp" class="navy-text font-semibold">https://thithi-lan.onrender.com/student</span> hoặc quét mã QR bên cạnh</div>
+                    <div>• Địa chỉ truy cập : <a id="displayIp" href="https://thithi-lan.onrender.com/student" target="_blank" class="navy-text font-semibold hover:underline">https://thithi-lan.onrender.com/student</a> hoặc quét mã QR bên cạnh</div>
                     <div>• Cấu hình : <span id="displayNumMcq" class="navy-text font-semibold">...</span> câu Trắc nghiệm và <span id="displayNumTf" class="navy-text font-semibold">...</span> câu Đúng/Sai</div>
                     <div>• Thời gian : <span id="displayDuration" class="navy-text font-semibold">...</span> phút</div>
                 </div>
@@ -229,6 +229,9 @@
         let examCountdownTimer = null;
 
         window.addEventListener('DOMContentLoaded', () => {
+            // Tự động khởi tạo đường dẫn học sinh chuẩn theo tên miền hiện tại
+            khoiTaoDuongDanHocSinh();
+
             Swal.fire({
                 title: '<span style="font-size: 18px; font-weight: bold; color: #0b3c6d;">Nhập thông tin Lớp</span>',
                 input: 'text',
@@ -260,23 +263,58 @@
             });
         });
 
+        function khoiTaoDuongDanHocSinh() {
+            fetch('/api/get_ip')
+                .then(r => r.json())
+                .then(data => {
+                    const studentUrl = data.url || `${window.location.origin}/student`;
+                    const displayIpEl = document.getElementById('displayIp');
+                    displayIpEl.innerText = studentUrl;
+                    displayIpEl.href = studentUrl;
+                })
+                .catch(() => {
+                    const fallbackUrl = `${window.location.origin}/student`;
+                    const displayIpEl = document.getElementById('displayIp');
+                    displayIpEl.innerText = fallbackUrl;
+                    displayIpEl.href = fallbackUrl;
+                });
+        }
+
         function generateQR() {
-            // Ép trực tiếp link HTTPS chuẩn của Render để học sinh quét vào ngay không bị đen màn hình
-            const studentUrl = "https://thithi-lan.onrender.com/student";
-            document.getElementById('displayIp').innerText = studentUrl;
-            
-            const qrContainer = document.getElementById('qrcode');
-            qrContainer.innerHTML = "";
+            fetch('/api/get_ip')
+                .then(r => r.json())
+                .then(data => {
+                    const studentUrl = data.url || `${window.location.origin}/student`;
+                    const displayIpEl = document.getElementById('displayIp');
+                    displayIpEl.innerText = studentUrl;
+                    displayIpEl.href = studentUrl;
+                    
+                    const qrContainer = document.getElementById('qrcode');
+                    qrContainer.innerHTML = "";
 
-            const parentBox = qrContainer.parentElement;
-            const size = Math.min(parentBox.clientWidth, parentBox.clientHeight) - 16;
+                    const parentBox = qrContainer.parentElement;
+                    const size = Math.min(parentBox.clientWidth, parentBox.clientHeight) - 16;
 
-            new QRCode(qrContainer, {
-                text: studentUrl,
-                width: size,
-                height: size,
-                correctLevel: QRCode.CorrectLevel.M
-            });
+                    new QRCode(qrContainer, {
+                        text: studentUrl,
+                        width: size,
+                        height: size,
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
+                })
+                .catch(() => {
+                    const fallbackUrl = `${window.location.origin}/student`;
+                    const qrContainer = document.getElementById('qrcode');
+                    qrContainer.innerHTML = "";
+                    const parentBox = qrContainer.parentElement;
+                    const size = Math.min(parentBox.clientWidth, parentBox.clientHeight) - 16;
+                    new QRCode(qrContainer, {
+                        text: fallbackUrl,
+                        width: size,
+                        height: size,
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
+                });
         }
 
         function uploadFileBank(event) {
@@ -331,6 +369,7 @@
 
         function saveSubform() {
             const payload = {
+                class_name: document.getElementById('displayClass').innerText.trim(),
                 num_mcq: parseInt(document.getElementById('subNumMcq').value) || 0,
                 score_mcq: parseFloat(document.getElementById('subScoreMcq').value) || 0,
                 num_tf: parseInt(document.getElementById('subNumTf').value) || 0,
@@ -502,14 +541,21 @@
                 const mins = Math.floor(st.time_left / 60);
                 const secs = st.time_left % 60;
                 const timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                
+                // Đổi màu trạng thái: Đã nộp hiện màu xanh lá đậm
+                const isSubmitted = st.submitted === "Đã nộp";
+                const submitBadge = isSubmitted 
+                    ? `<span class="text-green-600 font-bold">Đã nộp</span>` 
+                    : `<span class="navy-text font-semibold">${st.submitted}</span>`;
+
                 tr.innerHTML = `
                     <td class="py-2 border">${idx + 1}</td>
                     <td class="py-2 border font-mono">${st.ip}</td>
                     <td class="py-2 border font-semibold text-left px-2">${st.name}</td>
                     <td class="py-2 border font-mono font-bold navy-text">${timeStr}</td>
                     <td class="py-2 border font-bold ${st.violations > 0 ? 'text-red-600' : ''}">${st.violations}</td>
-                    <td class="py-2 border navy-text">${st.submitted}</td>
-                    <td class="border border-gray-300 py-1 px-2 font-bold text-gray-900">${st.score !== undefined ? st.score : 0.0}</td>
+                    <td class="py-2 border">${submitBadge}</td>
+                    <td class="border border-gray-300 py-1 px-2 font-bold ${isSubmitted ? 'text-green-700 text-sm' : 'text-gray-900'}">${st.score !== undefined ? st.score : 0.0}</td>
                 `;
                 tbody.appendChild(tr);
             });
