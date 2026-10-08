@@ -11,7 +11,7 @@ import zipfile
 from io import BytesIO
 from docx import Document
 from flask import Flask, render_template, request, jsonify, send_file
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -21,67 +21,83 @@ app.config['SECRET_KEY'] = 'lan_exam_secret_key_2026'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SUBMISSION_DIR = os.path.join(BASE_DIR, 'bailamthisinh')
+SUBMISSION_ROOT = os.path.join(BASE_DIR, 'bailamthisinh')
 UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
 
-for d in [SUBMISSION_DIR, UPLOAD_DIR]:
+for d in [SUBMISSION_ROOT, UPLOAD_DIR]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-submitted_ips = set()
+# Quản lý đa phòng thi độc lập
+rooms = {}
 
-def clear_submission_folder():
-    """Xóa sạch toàn bộ các file bài làm .txt và bảng điểm cũ trong thư mục bailamthisinh"""
-    if os.path.exists(SUBMISSION_DIR):
-        for fname in os.listdir(SUBMISSION_DIR):
-            fpath = os.path.join(SUBMISSION_DIR, fname)
+def get_or_create_room(room_id):
+    room_id = str(room_id).strip() if room_id else "default"
+    if room_id not in rooms:
+        room_dir = os.path.join(SUBMISSION_ROOT, room_id)
+        if not os.path.exists(room_dir):
+            os.makedirs(room_dir)
+        rooms[room_id] = {
+            "room_id": room_id,
+            "class_name": "",
+            "raw_bank": {"filename": "", "mcq": [], "tf": []},
+            "active_exam": {
+                "num_mcq": 0,
+                "score_mcq": 0.0,
+                "score_per_mcq": 0.0,
+                "num_tf": 0,
+                "score_tf": 0.0,
+                "score_per_tf": 0.0,
+                "duration": 15,
+                "tf_scale": {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0},
+                "status": "waiting",
+                "start_time": None
+            },
+            "students": {},
+            "submitted_ips": set()
+        }
+    return rooms[room_id]
+
+def get_submission_dir(room_id):
+    d = os.path.join(SUBMISSION_ROOT, str(room_id))
+    if not os.path.exists(d):
+        os.makedirs(d)
+    return d
+
+def clear_submission_folder(room_id):
+    """Xóa sạch bài làm cũ trong thư mục riêng của phòng thi"""
+    room_dir = get_submission_dir(room_id)
+    if os.path.exists(room_dir):
+        for fname in os.listdir(room_dir):
+            fpath = os.path.join(room_dir, fname)
             try:
                 if os.path.isfile(fpath):
                     os.remove(fpath)
             except Exception:
                 pass
 
-exam_state = {
-    "class_name": "",
-    "raw_bank": {"filename": "", "mcq": [], "tf": []},
-    "active_exam": {
-        "num_mcq": 0,
-        "score_mcq": 0.0,
-        "score_per_mcq": 0.0,
-        "num_tf": 0,
-        "score_tf": 0.0,
-        "score_per_tf": 0.0,
-        "duration": 15,
-        "tf_scale": {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0},
-        "status": "waiting",
-        "start_time": None
-    },
-    "payload": None,
-    "students": {}
-}
-
-# --- TIẾN TRÌNH TỰ ĐỘNG CHỐT BÀI PHÍA MÁY CHỦ KHI HẾT GIỜ ---
+# --- TIẾN TRÌNH TỰ ĐỘNG CHỐT BÀI PHÍA MÁY CHỦ CHO TỪNG PHÒNG ---
 def auto_exam_watcher():
-    """Tự động kiểm tra mỗi giây: nếu hết giờ thì tự chốt điểm ngay lập tức"""
+    """Tự động kiểm tra mỗi giây cho từng phòng: nếu hết giờ thì tự chốt điểm"""
     while True:
         eventlet.sleep(1)
-        active = exam_state["active_exam"]
-        if active["status"] == "running" and active["start_time"]:
-            elapsed = time.time() - active["start_time"]
-            total_duration = active["duration"] * 60
+        for room_id, rdata in list(rooms.items()):
+            active = rdata["active_exam"]
+            if active["status"] == "running" and active["start_time"]:
+                elapsed = time.time() - active["start_time"]
+                total_duration = active["duration"] * 60
 
-            # Cho phép trễ 3 giây bù mạng trước khi tự động chốt bài
-            if elapsed >= total_duration + 3:
-                has_updates = False
-                for sid, st in list(exam_state["students"].items()):
-                    if st.get("submitted") != "Đã nộp":
-                        st["time_left"] = 0
-                        process_grading(sid, st.get("answers", {}), st.get("name"))
-                        has_updates = True
+                if elapsed >= total_duration + 3:
+                    has_updates = False
+                    for sid, st in list(rdata["students"].items()):
+                        if st.get("submitted") != "Đã nộp":
+                            st["time_left"] = 0
+                            process_grading(room_id, sid, st.get("answers", {}), st.get("name"))
+                            has_updates = True
 
-                if has_updates:
-                    active["status"] = "finished"
-                    socketio.emit('update_teacher_list', list(exam_state["students"].values()))
+                    if has_updates:
+                        active["status"] = "finished"
+                        socketio.emit('update_teacher_list', list(rdata["students"].values()), to=room_id)
 
 eventlet.spawn(auto_exam_watcher)
 
@@ -110,12 +126,12 @@ def clean_question_text(raw_text):
         return ""
     return re.sub(r'^(câu\s*\d+[\s\:\.\-\)]*)\s*', '', raw_text.strip(), flags=re.IGNORECASE)
 
-def generate_individual_exam():
-    num_mcq = min(exam_state["active_exam"]["num_mcq"], len(exam_state["raw_bank"]["mcq"]))
-    num_tf = min(exam_state["active_exam"]["num_tf"], len(exam_state["raw_bank"]["tf"]))
+def generate_individual_exam(room_data):
+    num_mcq = min(room_data["active_exam"]["num_mcq"], len(room_data["raw_bank"]["mcq"]))
+    num_tf = min(room_data["active_exam"]["num_tf"], len(room_data["raw_bank"]["tf"]))
 
-    selected_mcq_raw = random.sample(exam_state["raw_bank"]["mcq"], num_mcq) if num_mcq > 0 else []
-    selected_tf_raw = random.sample(exam_state["raw_bank"]["tf"], num_tf) if num_tf > 0 else []
+    selected_mcq_raw = random.sample(room_data["raw_bank"]["mcq"], num_mcq) if num_mcq > 0 else []
+    selected_tf_raw = random.sample(room_data["raw_bank"]["tf"], num_tf) if num_tf > 0 else []
 
     random.shuffle(selected_mcq_raw)
     random.shuffle(selected_tf_raw)
@@ -173,7 +189,7 @@ def generate_individual_exam():
     client_payload = {
         "mcq": mcq_send,
         "tf": tf_send,
-        "duration": exam_state["active_exam"]["duration"]
+        "duration": room_data["active_exam"]["duration"]
     }
     server_exam = {
         "mcq": mcq_server,
@@ -181,7 +197,10 @@ def generate_individual_exam():
     }
     return client_payload, server_exam
 
-def update_summary_excel():
+def update_summary_excel(room_id):
+    room_data = get_or_create_room(room_id)
+    room_dir = get_submission_dir(room_id)
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Bang_Diem_Tong_Hop"
@@ -210,7 +229,7 @@ def update_summary_excel():
     idx = 1
     current_row = 2
 
-    for sid, st in exam_state["students"].items():
+    for sid, st in room_data["students"].items():
         mins = st['time_left'] // 60
         secs = st['time_left'] % 60
         score_val = float(st.get("score", 0.0))
@@ -281,17 +300,18 @@ def update_summary_excel():
         col_letter = get_column_letter(col_idx)
         ws.column_dimensions[col_letter].width = width
 
-    summary_path = os.path.join(SUBMISSION_DIR, "Bang_Diem_Tong_Hop.xlsx")
+    summary_path = os.path.join(room_dir, "Bang_Diem_Tong_Hop.xlsx")
     wb.save(summary_path)
 
-def save_individual_submission(st, answers, score):
+def save_individual_submission(room_id, st, answers, score):
+    room_dir = get_submission_dir(room_id)
     safe_name = re.sub(r'[^\w\s-]', '', st['name']).strip().replace(" ", "_")
     safe_ip = st["ip"].replace(":", "_")
     filename = f"{safe_name}_{safe_ip}.txt"
-    filepath = os.path.join(SUBMISSION_DIR, filename)
+    filepath = os.path.join(room_dir, filename)
 
-    exam_data = st.get("exam", exam_state["raw_bank"])
-
+    room_data = get_or_create_room(room_id)
+    exam_data = st.get("exam", room_data["raw_bank"])
     NL = "\r\n"
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -330,16 +350,17 @@ def save_individual_submission(st, answers, score):
                 f.write(f"   Đáp án : {expected}" + NL)
             f.write(NL)
 
-def process_grading(sid, answers=None, student_name=None):
+def process_grading(room_id, sid, answers=None, student_name=None):
+    room_data = get_or_create_room(room_id)
     st = None
     target_sid = sid
 
-    # 1. Tìm thí sinh theo sid hiện tại
-    if sid in exam_state["students"]:
-        st = exam_state["students"][sid]
-    # 2. Tìm theo tên nếu bị đổi sid
+    # 1. Tìm thí sinh theo sid
+    if sid in room_data["students"]:
+        st = room_data["students"][sid]
+    # 2. Tìm theo tên nếu thí sinh bị đổi sid (reload mạng)
     elif student_name:
-        for s_id, s_data in exam_state["students"].items():
+        for s_id, s_data in room_data["students"].items():
             if s_data.get("name") == student_name and s_data.get("submitted") != "Đã nộp":
                 st = s_data
                 target_sid = s_id
@@ -348,7 +369,7 @@ def process_grading(sid, answers=None, student_name=None):
     if not st:
         return
 
-    # Nếu đã chấm thì chỉ cần gửi lại ack xác nhận điểm
+    # Nếu đã chấm thì chỉ cần gửi lại kết quả xác nhận
     if st.get("submitted") == "Đã nộp":
         socketio.emit('exam_finished_ack', {"score": st.get("score", 0.0)}, room=sid)
         if target_sid != sid:
@@ -363,25 +384,25 @@ def process_grading(sid, answers=None, student_name=None):
     st["submitted"] = "Đã nộp"
     st["answers"] = answers
     st["time_left"] = 0
-    submitted_ips.add(st["ip"])
+    room_data["submitted_ips"].add(st["ip"])
 
     student_exam = st.get("exam")
     if not student_exam:
         student_exam = {
-            "mcq": exam_state["raw_bank"]["mcq"][:exam_state["active_exam"]["num_mcq"]],
-            "tf": exam_state["raw_bank"]["tf"][:exam_state["active_exam"]["num_tf"]]
+            "mcq": room_data["raw_bank"]["mcq"][:room_data["active_exam"]["num_mcq"]],
+            "tf": room_data["raw_bank"]["tf"][:room_data["active_exam"]["num_tf"]]
         }
 
     score = 0.0
-    mcq_pts = exam_state["active_exam"].get("score_per_mcq", 0.25)
+    mcq_pts = room_data["active_exam"].get("score_per_mcq", 0.25)
     for q in student_exam.get("mcq", []):
         ans = answers.get(f"mcq_{q['id']}")
         correct_opt = next((opt['key'] for opt in q['options'] if opt.get('correct')), None)
         if ans and str(ans).strip().upper() == str(correct_opt).strip().upper():
             score += mcq_pts
 
-    tf_pts = exam_state["active_exam"].get("score_per_tf", 1.0)
-    scale = exam_state["active_exam"].get("tf_scale", {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0})
+    tf_pts = room_data["active_exam"].get("score_per_tf", 1.0)
+    scale = room_data["active_exam"].get("tf_scale", {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0})
     for q in student_exam.get("tf", []):
         correct_cnt = 0
         for sub in q.get('sub_items', []):
@@ -394,11 +415,11 @@ def process_grading(sid, answers=None, student_name=None):
 
     st["score"] = round(score, 2)
 
-    save_individual_submission(st, answers, st["score"])
-    update_summary_excel()
+    save_individual_submission(room_id, st, answers, st["score"])
+    update_summary_excel(room_id)
 
-    # Cập nhật danh sách giám thị
-    socketio.emit('update_teacher_list', list(exam_state["students"].values()))
+    # Cập nhật danh sách giám thị theo phòng
+    socketio.emit('update_teacher_list', list(room_data["students"].values()), to=room_id)
     
     # Báo điểm về cho học sinh
     socketio.emit('exam_finished_ack', {"score": st["score"]}, room=sid)
@@ -415,21 +436,28 @@ def student_view():
 
 @app.route('/api/get_ip', methods=['GET'])
 def api_get_ip():
+    room_id = request.args.get('room', '')
     base_url = get_base_url()
+    url = f"{base_url}/student"
+    if room_id:
+        url += f"?room={room_id}"
     return jsonify({
         "ip": base_url.replace("http://", "").replace("https://", "").split(":")[0],
         "port": 5000,
-        "url": f"{base_url}/student"
+        "url": url
     })
 
 @app.route('/api/upload_bank', methods=['POST'])
 def upload_bank():
+    room_id = request.form.get('room', 'default')
+    room_data = get_or_create_room(room_id)
+
     if 'file' not in request.files:
         return jsonify({"success": False, "error": "Không tìm thấy file tải lên!"})
     
     file = request.files['file']
     filename = file.filename
-    save_path = os.path.join(UPLOAD_DIR, filename)
+    save_path = os.path.join(UPLOAD_DIR, f"{room_id}_{filename}")
     file.save(save_path)
 
     try:
@@ -513,25 +541,27 @@ def upload_bank():
         if len(q['sub_items']) == 0:
             return jsonify({"success": False, "error": f"Câu {q['id']} (Phần 2) chưa có các ý hỏi con!"})
 
-    exam_state["raw_bank"] = {"filename": filename, "mcq": mcq_questions, "tf": tf_questions}
+    room_data["raw_bank"] = {"filename": filename, "mcq": mcq_questions, "tf": tf_questions}
     return jsonify({"success": True, "filename": filename, "total_mcq": len(mcq_questions), "total_tf": len(tf_questions)})
 
 @app.route('/api/configure_exam', methods=['POST'])
 def configure_exam():
-    global submitted_ips
-    submitted_ips.clear()
-    exam_state["students"].clear()
-    clear_submission_folder()
+    data = request.json or {}
+    room_id = data.get("room", "default")
+    room_data = get_or_create_room(room_id)
 
-    data = request.json
+    room_data["submitted_ips"].clear()
+    room_data["students"].clear()
+    clear_submission_folder(room_id)
+
     n_mcq = data.get("num_mcq", 0)
     s_mcq = data.get("score_mcq", 0.0)
     n_tf = data.get("num_tf", 0)
     s_tf = data.get("score_tf", 0.0)
     dur = data.get("duration", 15)
 
-    exam_state["class_name"] = data.get("class_name", "")
-    exam_state["active_exam"].update({
+    room_data["class_name"] = data.get("class_name", "")
+    room_data["active_exam"].update({
         "num_mcq": n_mcq,
         "score_mcq": s_mcq,
         "score_per_mcq": round(s_mcq / max(1, n_mcq), 3),
@@ -542,47 +572,55 @@ def configure_exam():
         "tf_scale": data.get("tf_scale", {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0}),
         "status": "ready"
     })
-    socketio.emit('update_teacher_list', [])
+    socketio.emit('update_teacher_list', [], to=room_id)
     return jsonify({"success": True})
 
 @app.route('/api/reset_exam', methods=['POST'])
 def api_reset_exam():
-    global submitted_ips
-    submitted_ips.clear()
-    exam_state["students"].clear()
-    clear_submission_folder()
-    exam_state["class_name"] = ""
-    exam_state["active_exam"] = {
+    data = request.json or {}
+    room_id = data.get("room", "default")
+    room_data = get_or_create_room(room_id)
+
+    room_data["submitted_ips"].clear()
+    room_data["students"].clear()
+    clear_submission_folder(room_id)
+    room_data["class_name"] = ""
+    room_data["active_exam"] = {
         "num_mcq": 0, "score_mcq": 0.0, "score_per_mcq": 0.0,
         "num_tf": 0, "score_tf": 0.0, "score_per_tf": 0.0,
         "duration": 15, "tf_scale": {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0},
         "status": "waiting", "start_time": None
     }
-    socketio.emit('update_teacher_list', [])
+    socketio.emit('update_teacher_list', [], to=room_id)
     return jsonify({"success": True})
 
 @app.route('/api/export_excel', methods=['GET'])
 def export_excel():
-    summary_path = os.path.join(SUBMISSION_DIR, "Bang_Diem_Tong_Hop.xlsx")
+    room_id = request.args.get('room', 'default')
+    room_dir = get_submission_dir(room_id)
+    summary_path = os.path.join(room_dir, "Bang_Diem_Tong_Hop.xlsx")
     if os.path.exists(summary_path):
         return send_file(summary_path, as_attachment=True, download_name="Bang_Diem_Tong_Hop.xlsx")
-    update_summary_excel()
+    update_summary_excel(room_id)
     return send_file(summary_path, as_attachment=True, download_name="Bang_Diem_Tong_Hop.xlsx")
 
-# --- API NÉN VÀ TẢI TOÀN BỘ KẾT QUẢ (EXCEL + BÀI LÀM) THÀNH FILE ZIP ---
+# --- API NÉN VÀ TẢI TOÀN BỘ KẾT QUẢ RIÊNG CỦA PHÒNG THI THÀNH FILE ZIP ---
 @app.route('/api/download_all_results', methods=['GET'])
 def download_all_results():
-    """Đóng gói toàn bộ file Excel bảng điểm và tất cả bài làm txt thành file zip"""
-    update_summary_excel()
+    room_id = request.args.get('room', 'default')
+    room_data = get_or_create_room(room_id)
+    room_dir = get_submission_dir(room_id)
+
+    update_summary_excel(room_id)
     memory_file = BytesIO()
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(SUBMISSION_DIR):
+        for root, dirs, files in os.walk(room_dir):
             for file in files:
                 file_path = os.path.join(root, file)
                 zf.write(file_path, arcname=file)
 
     memory_file.seek(0)
-    class_name = exam_state.get("class_name", "CaThi").replace(" ", "_")
+    class_name = room_data.get("class_name", f"Phong_{room_id}").replace(" ", "_")
     zip_filename = f"KetQua_BaiThi_{class_name}.zip"
 
     return send_file(
@@ -592,37 +630,48 @@ def download_all_results():
         download_name=zip_filename
     )
 
-# --- SOCKET.IO REALTIME EVENTS ---
+# --- SOCKET.IO REALTIME EVENTS THEO TỪNG PHÒNG THI ---
+@socketio.on('join_teacher')
+def handle_teacher_join(data):
+    room_id = data.get('room', 'default')
+    join_room(room_id)
+    room_data = get_or_create_room(room_id)
+    emit('update_teacher_list', list(room_data["students"].values()), room=request.sid)
+
 @socketio.on('join_student')
 def handle_student_join(data):
     sid = request.sid
+    room_id = data.get('room', 'default')
+    join_room(room_id)
+    room_data = get_or_create_room(room_id)
     client_ip = get_client_ip(request)
 
-    if client_ip in submitted_ips:
-        emit('exam_blocked', {'message': 'Bạn đã thi rồi!'}, room=sid)
+    if client_ip in room_data["submitted_ips"]:
+        emit('exam_blocked', {'message': 'Bạn đã thi rồi trong phòng này!'}, room=sid)
         return
 
     name = data.get('name', 'Thí sinh').strip() or 'Thí sinh'
 
     existing_sid = None
-    for s_id, s_data in exam_state["students"].items():
+    for s_id, s_data in room_data["students"].items():
         if s_data["name"] == name and s_data["ip"] == client_ip:
             existing_sid = s_id
             break
 
-    time_left = exam_state["active_exam"]["duration"] * 60
-    if exam_state["active_exam"]["status"] == "running" and exam_state["active_exam"]["start_time"]:
-        elapsed = int(time.time() - exam_state["active_exam"]["start_time"])
+    time_left = room_data["active_exam"]["duration"] * 60
+    if room_data["active_exam"]["status"] == "running" and room_data["active_exam"]["start_time"]:
+        elapsed = int(time.time() - room_data["active_exam"]["start_time"])
         time_left = max(0, time_left - elapsed)
 
     if existing_sid:
-        student_record = exam_state["students"].pop(existing_sid)
+        student_record = room_data["students"].pop(existing_sid)
         student_record["time_left"] = time_left
-        exam_state["students"][sid] = student_record
+        room_data["students"][sid] = student_record
     else:
-        exam_state["students"][sid] = {
+        room_data["students"][sid] = {
             "ip": client_ip,
             "name": name,
+            "room": room_id,
             "time_left": time_left,
             "violations": 0,
             "submitted": "Đang thi",
@@ -631,19 +680,19 @@ def handle_student_join(data):
             "exam": None
         }
 
-    emit('update_teacher_list', list(exam_state["students"].values()), broadcast=True)
+    emit('update_teacher_list', list(room_data["students"].values()), to=room_id)
 
-    if exam_state["active_exam"]["status"] == "running":
-        if not exam_state["students"][sid].get("exam"):
-            client_payload, server_exam = generate_individual_exam()
-            exam_state["students"][sid]["exam"] = server_exam
+    if room_data["active_exam"]["status"] == "running":
+        if not room_data["students"][sid].get("exam"):
+            client_payload, server_exam = generate_individual_exam(room_data)
+            room_data["students"][sid]["exam"] = server_exam
             client_payload["time_left"] = time_left
             emit('start_exam_now', client_payload, room=sid)
         else:
             client_payload = {
-                "mcq": [{"id": q["id"], "type": "mcq", "question": q["question"], "options": [{"key": o["key"], "text": o["text"]} for o in q["options"]]} for q in exam_state["students"][sid]["exam"]["mcq"]],
-                "tf": [{"id": q["id"], "type": "tf", "question": q["question"], "sub_items": [{"key": s["key"], "text": s["text"]} for s in q["sub_items"]]} for q in exam_state["students"][sid]["exam"]["tf"]],
-                "duration": exam_state["active_exam"]["duration"],
+                "mcq": [{"id": q["id"], "type": "mcq", "question": q["question"], "options": [{"key": o["key"], "text": o["text"]} for o in q["options"]]} for q in room_data["students"][sid]["exam"]["mcq"]],
+                "tf": [{"id": q["id"], "type": "tf", "question": q["question"], "sub_items": [{"key": s["key"], "text": s["text"]} for s in q["sub_items"]]} for q in room_data["students"][sid]["exam"]["tf"]],
+                "duration": room_data["active_exam"]["duration"],
                 "time_left": time_left
             }
             emit('start_exam_now', client_payload, room=sid)
@@ -651,63 +700,74 @@ def handle_student_join(data):
 @socketio.on('sync_answer')
 def handle_sync_answer(data):
     sid = request.sid
-    if sid in exam_state["students"]:
+    room_id = data.get('room', 'default')
+    room_data = get_or_create_room(room_id)
+    if sid in room_data["students"]:
         key = data.get("key")
         val = data.get("val")
         if key:
-            exam_state["students"][sid]["answers"][key] = val
+            room_data["students"][sid]["answers"][key] = val
 
 @socketio.on('sync_timer')
 def handle_timer_sync(data):
     sid = request.sid
-    if sid in exam_state["students"]:
-        st = exam_state["students"][sid]
+    room_id = data.get('room', 'default')
+    room_data = get_or_create_room(room_id)
+    if sid in room_data["students"]:
+        st = room_data["students"][sid]
         t_left = data.get("time_left", 0)
         st["time_left"] = t_left
 
         if t_left <= 0 and st["submitted"] != "Đã nộp":
-            process_grading(sid, st.get("answers", {}), st.get("name"))
+            process_grading(room_id, sid, st.get("answers", {}), st.get("name"))
 
 @socketio.on('report_violation')
-def handle_violation():
+def handle_violation(data):
     sid = request.sid
-    if sid in exam_state["students"]:
-        exam_state["students"][sid]["violations"] += 1
-        emit('update_teacher_list', list(exam_state["students"].values()), broadcast=True)
+    room_id = data.get('room', 'default') if isinstance(data, dict) else 'default'
+    room_data = get_or_create_room(room_id)
+    if sid in room_data["students"]:
+        room_data["students"][sid]["violations"] += 1
+        emit('update_teacher_list', list(room_data["students"].values()), to=room_id)
 
 @socketio.on('submit_exam')
 def handle_submit(data):
     sid = request.sid
+    room_id = data.get('room', 'default') if isinstance(data, dict) else 'default'
     if isinstance(data, dict) and 'answers' in data:
-        process_grading(sid, data.get('answers', {}), data.get('name'))
+        process_grading(room_id, sid, data.get('answers', {}), data.get('name'))
     else:
-        process_grading(sid, data if isinstance(data, dict) else {})
+        process_grading(room_id, sid, data if isinstance(data, dict) else {})
 
 @socketio.on('teacher_start_exam')
-def teacher_start():
-    global submitted_ips
-    submitted_ips.clear()
-    clear_submission_folder()  # Dọn sạch các bài thi cũ trước khi ca thi mới bắt đầu
+def teacher_start(data):
+    room_id = data.get('room', 'default') if isinstance(data, dict) else 'default'
+    room_data = get_or_create_room(room_id)
 
-    exam_state["active_exam"]["status"] = "running"
-    exam_state["active_exam"]["start_time"] = time.time()
+    room_data["submitted_ips"].clear()
+    clear_submission_folder(room_id)
+
+    room_data["active_exam"]["status"] = "running"
+    room_data["active_exam"]["start_time"] = time.time()
     
-    duration_secs = exam_state["active_exam"]["duration"] * 60
-    for sid, st in exam_state["students"].items():
-        client_payload, server_exam = generate_individual_exam()
+    duration_secs = room_data["active_exam"]["duration"] * 60
+    for sid, st in room_data["students"].items():
+        client_payload, server_exam = generate_individual_exam(room_data)
         st["exam"] = server_exam
         client_payload["time_left"] = duration_secs
         emit('start_exam_now', client_payload, room=sid)
 
 @socketio.on('reset_exam_session')
-def handle_reset_session():
-    global submitted_ips
-    submitted_ips.clear()
-    exam_state["students"].clear()
-    clear_submission_folder()
-    exam_state["active_exam"]["status"] = "waiting"
-    exam_state["active_exam"]["start_time"] = None
-    emit('update_teacher_list', [], broadcast=True)
+def handle_reset_session(data):
+    room_id = data.get('room', 'default') if isinstance(data, dict) else 'default'
+    room_data = get_or_create_room(room_id)
+
+    room_data["submitted_ips"].clear()
+    room_data["students"].clear()
+    clear_submission_folder(room_id)
+    room_data["active_exam"]["status"] = "waiting"
+    room_data["active_exam"]["start_time"] = None
+    emit('update_teacher_list', [], to=room_id)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
