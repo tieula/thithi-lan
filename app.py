@@ -28,7 +28,6 @@ for d in [SUBMISSION_ROOT, UPLOAD_DIR]:
     if not os.path.exists(d):
         os.makedirs(d)
 
-# Quản lý đa phòng thi độc lập
 rooms = {}
 
 def get_or_create_room(room_id):
@@ -40,7 +39,7 @@ def get_or_create_room(room_id):
         rooms[room_id] = {
             "room_id": room_id,
             "class_name": "",
-            "raw_bank": {"filename": "", "mcq": [], "tf": []},
+            "raw_bank": {"filename": "", "mcq": [], "tf": [], "sa": []},
             "active_exam": {
                 "num_mcq": 0,
                 "score_mcq": 0.0,
@@ -48,6 +47,9 @@ def get_or_create_room(room_id):
                 "num_tf": 0,
                 "score_tf": 0.0,
                 "score_per_tf": 0.0,
+                "num_sa": 0,
+                "score_sa": 0.0,
+                "score_per_sa": 0.0,
                 "duration": 15,
                 "tf_scale": {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0},
                 "status": "waiting",
@@ -65,7 +67,6 @@ def get_submission_dir(room_id):
     return d
 
 def clear_submission_folder(room_id):
-    """Xóa sạch bài làm cũ trong thư mục riêng của phòng thi"""
     room_dir = get_submission_dir(room_id)
     if os.path.exists(room_dir):
         for fname in os.listdir(room_dir):
@@ -78,7 +79,6 @@ def clear_submission_folder(room_id):
 
 # --- TIẾN TRÌNH TỰ ĐỘNG CHỐT BÀI PHÍA MÁY CHỦ CHO TỪNG PHÒNG ---
 def auto_exam_watcher():
-    """Tự động kiểm tra mỗi giây cho từng phòng: nếu hết giờ thì tự chốt điểm"""
     while True:
         eventlet.sleep(1)
         for room_id, rdata in list(rooms.items()):
@@ -102,7 +102,6 @@ def auto_exam_watcher():
 eventlet.spawn(auto_exam_watcher)
 
 def get_client_ip(req):
-    """Lấy đúng địa chỉ IP của thí sinh khi chạy sau proxy của Render"""
     if req.headers.get('X-Forwarded-For'):
         return req.headers.get('X-Forwarded-For').split(',')[0].strip()
     return req.remote_addr or '127.0.0.1'
@@ -129,71 +128,58 @@ def clean_question_text(raw_text):
 def generate_individual_exam(room_data):
     num_mcq = min(room_data["active_exam"]["num_mcq"], len(room_data["raw_bank"]["mcq"]))
     num_tf = min(room_data["active_exam"]["num_tf"], len(room_data["raw_bank"]["tf"]))
+    num_sa = min(room_data["active_exam"].get("num_sa", 0), len(room_data["raw_bank"].get("sa", [])))
 
     selected_mcq_raw = random.sample(room_data["raw_bank"]["mcq"], num_mcq) if num_mcq > 0 else []
     selected_tf_raw = random.sample(room_data["raw_bank"]["tf"], num_tf) if num_tf > 0 else []
+    selected_sa_raw = random.sample(room_data["raw_bank"]["sa"], num_sa) if num_sa > 0 else []
 
     random.shuffle(selected_mcq_raw)
     random.shuffle(selected_tf_raw)
+    random.shuffle(selected_sa_raw)
 
-    mcq_send = []
-    mcq_server = []
-
+    # 1. Xử lý Trắc nghiệm (G1)
+    mcq_send, mcq_server = [], []
     labels = ['A', 'B', 'C', 'D']
     for idx, q in enumerate(selected_mcq_raw, 1):
         shuffled_opts = copy.deepcopy(q['options'])
         random.shuffle(shuffled_opts)
-
-        client_opts = []
-        server_opts = []
-
+        client_opts, server_opts = [], []
         for o_idx, opt in enumerate(shuffled_opts):
             key = labels[o_idx] if o_idx < len(labels) else opt['key']
             client_opts.append({"key": key, "text": opt["text"]})
             server_opts.append({"key": key, "text": opt["text"], "correct": opt.get("correct", False)})
 
         clean_q = clean_question_text(q["question"])
-        mcq_send.append({
-            "id": idx,
-            "type": "mcq",
-            "question": clean_q,
-            "options": client_opts
-        })
-        mcq_server.append({
-            "id": idx,
-            "type": "mcq",
-            "question": clean_q,
-            "options": server_opts
-        })
+        mcq_send.append({"id": idx, "type": "mcq", "question": clean_q, "options": client_opts})
+        mcq_server.append({"id": idx, "type": "mcq", "question": clean_q, "options": server_opts})
 
-    tf_send = []
-    tf_server = []
+    # 2. Xử lý Đúng / Sai (G2)
+    tf_send, tf_server = [], []
     for idx, q in enumerate(selected_tf_raw, 1):
         client_subs = [{"key": s["key"], "text": s["text"]} for s in q["sub_items"]]
         server_subs = [{"key": s["key"], "text": s["text"], "correct": s.get("correct", False)} for s in q["sub_items"]]
-
         clean_q_tf = clean_question_text(q["question"])
-        tf_send.append({
-            "id": idx,
-            "type": "tf",
-            "question": clean_q_tf,
-            "sub_items": client_subs
-        })
-        tf_server.append({
-            "id": idx,
-            "type": "tf",
-            "question": clean_q_tf,
-            "sub_items": server_subs
-        })
+        tf_send.append({"id": idx, "type": "tf", "question": clean_q_tf, "sub_items": client_subs})
+        tf_server.append({"id": idx, "type": "tf", "question": clean_q_tf, "sub_items": server_subs})
+
+    # 3. Xử lý Trả lời ngắn (G3)
+    sa_send, sa_server = [], []
+    for idx, q in enumerate(selected_sa_raw, 1):
+        clean_q_sa = clean_question_text(q["question"])
+        sa_send.append({"id": idx, "type": "sa", "question": clean_q_sa})
+        sa_server.append({"id": idx, "type": "sa", "question": clean_q_sa, "answers": q.get("answers", [])})
 
     client_payload = {
         "mcq": mcq_send,
         "tf": tf_send,
+        "sa": sa_send,
         "duration": room_data["active_exam"]["duration"]
     }
     server_exam = {
         "mcq": mcq_server,
-        "tf": tf_server
+        "tf": tf_server,
+        "sa": sa_server
     }
     return client_payload, server_exam
 
@@ -350,15 +336,26 @@ def save_individual_submission(room_id, st, answers, score):
                 f.write(f"   Đáp án : {expected}" + NL)
             f.write(NL)
 
+        # --- PHẦN 3: TRẮC NGHIỆM TRẢ LỜI NGẮN ---
+        f.write(" PHẦN 3: CÂU HỎI TRẢ LỜI NGẮN" + NL)
+        f.write("---------------------------------------------" + NL + NL)
+        sa_list = exam_data.get("sa", [])
+        for idx, q in enumerate(sa_list, 1):
+            user_val = answers.get(f"sa_{q['id']}", "Chưa làm")
+            expected_list = q.get("answers", [])
+            expected_str = " / ".join(expected_list) if expected_list else "Chưa rõ"
+            f.write(f"Câu {idx}: {q['question']}" + NL)
+            f.write(f"   Thí sinh : {user_val}" + NL)
+            f.write(f"   Đáp án chuẩn : {expected_str}" + NL)
+            f.write(NL)
+
 def process_grading(room_id, sid, answers=None, student_name=None):
     room_data = get_or_create_room(room_id)
     st = None
     target_sid = sid
 
-    # 1. Tìm thí sinh theo sid
     if sid in room_data["students"]:
         st = room_data["students"][sid]
-    # 2. Tìm theo tên nếu thí sinh bị đổi sid (reload mạng)
     elif student_name:
         for s_id, s_data in room_data["students"].items():
             if s_data.get("name") == student_name and s_data.get("submitted") != "Đã nộp":
@@ -369,7 +366,6 @@ def process_grading(room_id, sid, answers=None, student_name=None):
     if not st:
         return
 
-    # Nếu đã chấm thì chỉ cần gửi lại kết quả xác nhận
     if st.get("submitted") == "Đã nộp":
         socketio.emit('exam_finished_ack', {"score": st.get("score", 0.0)}, room=sid)
         if target_sid != sid:
@@ -390,10 +386,13 @@ def process_grading(room_id, sid, answers=None, student_name=None):
     if not student_exam:
         student_exam = {
             "mcq": room_data["raw_bank"]["mcq"][:room_data["active_exam"]["num_mcq"]],
-            "tf": room_data["raw_bank"]["tf"][:room_data["active_exam"]["num_tf"]]
+            "tf": room_data["raw_bank"]["tf"][:room_data["active_exam"]["num_tf"]],
+            "sa": room_data["raw_bank"].get("sa", [])[:room_data["active_exam"].get("num_sa", 0)]
         }
 
     score = 0.0
+
+    # Chấm Phần 1 (MCQ)
     mcq_pts = room_data["active_exam"].get("score_per_mcq", 0.25)
     for q in student_exam.get("mcq", []):
         ans = answers.get(f"mcq_{q['id']}")
@@ -401,6 +400,7 @@ def process_grading(room_id, sid, answers=None, student_name=None):
         if ans and str(ans).strip().upper() == str(correct_opt).strip().upper():
             score += mcq_pts
 
+    # Chấm Phần 2 (Đúng / Sai)
     tf_pts = room_data["active_exam"].get("score_per_tf", 1.0)
     scale = room_data["active_exam"].get("tf_scale", {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0})
     for q in student_exam.get("tf", []):
@@ -413,15 +413,22 @@ def process_grading(room_id, sid, answers=None, student_name=None):
         ratio = float(scale.get(str(correct_cnt), 0.0))
         score += tf_pts * ratio
 
+    # Chấm Phần 3 (Trả lời ngắn)
+    sa_pts = room_data["active_exam"].get("score_per_sa", 0.0)
+    for q in student_exam.get("sa", []):
+        user_val = answers.get(f"sa_{q['id']}", "")
+        if user_val:
+            cleaned_user = str(user_val).strip().lower()
+            valid_answers = [str(a).strip().lower() for a in q.get("answers", [])]
+            if cleaned_user in valid_answers:
+                score += sa_pts
+
     st["score"] = round(score, 2)
 
     save_individual_submission(room_id, st, answers, st["score"])
     update_summary_excel(room_id)
 
-    # Cập nhật danh sách giám thị theo phòng
     socketio.emit('update_teacher_list', list(room_data["students"].values()), to=room_id)
-    
-    # Báo điểm về cho học sinh
     socketio.emit('exam_finished_ack', {"score": st["score"]}, room=sid)
     if target_sid != sid:
         socketio.emit('exam_finished_ack', {"score": st["score"]}, room=target_sid)
@@ -474,10 +481,12 @@ def upload_bank():
 
     mcq_questions = []
     tf_questions = []
+    sa_questions = []
     current_mode = None
     curr_q = None
     q_counter_mcq = 0
     q_counter_tf = 0
+    q_counter_sa = 0
 
     for line in paragraphs:
         lower_line = line.lower()
@@ -485,6 +494,7 @@ def upload_bank():
             if curr_q:
                 if current_mode == 'g1': mcq_questions.append(curr_q)
                 elif current_mode == 'g2': tf_questions.append(curr_q)
+                elif current_mode == 'g3': sa_questions.append(curr_q)
                 curr_q = None
             current_mode = 'g1'
             continue
@@ -492,8 +502,17 @@ def upload_bank():
             if curr_q:
                 if current_mode == 'g1': mcq_questions.append(curr_q)
                 elif current_mode == 'g2': tf_questions.append(curr_q)
+                elif current_mode == 'g3': sa_questions.append(curr_q)
                 curr_q = None
             current_mode = 'g2'
+            continue
+        elif lower_line.startswith('g3') or 'phần 3' in lower_line or 'phan 3' in lower_line or 'part 3' in lower_line:
+            if curr_q:
+                if current_mode == 'g1': mcq_questions.append(curr_q)
+                elif current_mode == 'g2': tf_questions.append(curr_q)
+                elif current_mode == 'g3': sa_questions.append(curr_q)
+                curr_q = None
+            current_mode = 'g3'
             continue
 
         if current_mode == 'g1':
@@ -528,9 +547,27 @@ def upload_bank():
                 else:
                     curr_q["question"] += "\n" + line
 
+        elif current_mode == 'g3':
+            # Nhận dạng đáp án trả lời ngắn bắt đầu bằng dấu # hoặc [ĐÁP ÁN]
+            match_sa_ans = re.match(r'^(?:#|đáp\s*án\s*[\:\.]?\s*)(.+)', line, re.IGNORECASE)
+            if match_sa_ans:
+                if not curr_q:
+                    return jsonify({"success": False, "error": f"Lỗi tại đáp án ngắn: '{line}'. Chưa có câu hỏi!"})
+                raw_ans_list = match_sa_ans.group(1).split('|')
+                curr_q['answers'] = [a.strip() for a in raw_ans_list if a.strip()]
+            else:
+                is_new_q = re.match(r'^câu\s*\d+', lower_line) or (curr_q is None)
+                if is_new_q:
+                    if curr_q: sa_questions.append(curr_q)
+                    q_counter_sa += 1
+                    curr_q = {"id": q_counter_sa, "type": "sa", "question": line, "answers": []}
+                else:
+                    curr_q["question"] += "\n" + line
+
     if curr_q:
         if current_mode == 'g1': mcq_questions.append(curr_q)
         elif current_mode == 'g2': tf_questions.append(curr_q)
+        elif current_mode == 'g3': sa_questions.append(curr_q)
 
     for q in mcq_questions:
         num_c = sum(1 for opt in q['options'] if opt['correct'])
@@ -541,8 +578,23 @@ def upload_bank():
         if len(q['sub_items']) == 0:
             return jsonify({"success": False, "error": f"Câu {q['id']} (Phần 2) chưa có các ý hỏi con!"})
 
-    room_data["raw_bank"] = {"filename": filename, "mcq": mcq_questions, "tf": tf_questions}
-    return jsonify({"success": True, "filename": filename, "total_mcq": len(mcq_questions), "total_tf": len(tf_questions)})
+    for q in sa_questions:
+        if len(q.get('answers', [])) == 0:
+            return jsonify({"success": False, "error": f"Câu {q['id']} (Phần 3) chưa có đáp án đúng (bắt đầu bằng dấu #)!"})
+
+    room_data["raw_bank"] = {
+        "filename": filename,
+        "mcq": mcq_questions,
+        "tf": tf_questions,
+        "sa": sa_questions
+    }
+    return jsonify({
+        "success": True,
+        "filename": filename,
+        "total_mcq": len(mcq_questions),
+        "total_tf": len(tf_questions),
+        "total_sa": len(sa_questions)
+    })
 
 @app.route('/api/configure_exam', methods=['POST'])
 def configure_exam():
@@ -558,6 +610,8 @@ def configure_exam():
     s_mcq = data.get("score_mcq", 0.0)
     n_tf = data.get("num_tf", 0)
     s_tf = data.get("score_tf", 0.0)
+    n_sa = data.get("num_sa", 0)
+    s_sa = data.get("score_sa", 0.0)
     dur = data.get("duration", 15)
 
     room_data["class_name"] = data.get("class_name", "")
@@ -568,6 +622,9 @@ def configure_exam():
         "num_tf": n_tf,
         "score_tf": s_tf,
         "score_per_tf": round(s_tf / max(1, n_tf), 3),
+        "num_sa": n_sa,
+        "score_sa": s_sa,
+        "score_per_sa": round(s_sa / max(1, n_sa), 3),
         "duration": dur,
         "tf_scale": data.get("tf_scale", {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0}),
         "status": "ready"
@@ -588,6 +645,7 @@ def api_reset_exam():
     room_data["active_exam"] = {
         "num_mcq": 0, "score_mcq": 0.0, "score_per_mcq": 0.0,
         "num_tf": 0, "score_tf": 0.0, "score_per_tf": 0.0,
+        "num_sa": 0, "score_sa": 0.0, "score_per_sa": 0.0,
         "duration": 15, "tf_scale": {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0},
         "status": "waiting", "start_time": None
     }
@@ -604,7 +662,6 @@ def export_excel():
     update_summary_excel(room_id)
     return send_file(summary_path, as_attachment=True, download_name="Bang_Diem_Tong_Hop.xlsx")
 
-# --- API NÉN VÀ TẢI TOÀN BỘ KẾT QUẢ RIÊNG CỦA PHÒNG THI THÀNH FILE ZIP ---
 @app.route('/api/download_all_results', methods=['GET'])
 def download_all_results():
     room_id = request.args.get('room', 'default')
@@ -630,7 +687,6 @@ def download_all_results():
         download_name=zip_filename
     )
 
-# --- SOCKET.IO REALTIME EVENTS THEO TỪNG PHÒNG THI ---
 @socketio.on('join_teacher')
 def handle_teacher_join(data):
     room_id = data.get('room', 'default')
@@ -692,6 +748,7 @@ def handle_student_join(data):
             client_payload = {
                 "mcq": [{"id": q["id"], "type": "mcq", "question": q["question"], "options": [{"key": o["key"], "text": o["text"]} for o in q["options"]]} for q in room_data["students"][sid]["exam"]["mcq"]],
                 "tf": [{"id": q["id"], "type": "tf", "question": q["question"], "sub_items": [{"key": s["key"], "text": s["text"]} for s in q["sub_items"]]} for q in room_data["students"][sid]["exam"]["tf"]],
+                "sa": [{"id": q["id"], "type": "sa", "question": q["question"]} for q in room_data["students"][sid]["exam"].get("sa", [])],
                 "duration": room_data["active_exam"]["duration"],
                 "time_left": time_left
             }
