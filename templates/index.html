@@ -55,8 +55,12 @@
             <div class="md:col-span-3 border border-gray-300 bg-white p-4 rounded shadow-sm flex flex-col justify-around text-sm">
                 <h2 class="text-center font-bold text-gray-800 tracking-wide text-base">THÔNG TIN CA THI & CẤU HÌNH ĐỀ</h2>
                 <div class="space-y-1 mt-2">
-                    <div>• Lớp : <span id="displayClass" class="navy-text font-semibold">Chưa nhập</span> &nbsp; Đã vào phòng : <span id="onlineCount" class="navy-text font-semibold">0</span> thí sinh</div>
-                    <div>• Địa chỉ truy cập : <a id="displayIp" href="https://thithi-lan.onrender.com/student" target="_blank" class="navy-text font-semibold hover:underline">https://thithi-lan.onrender.com/student</a> hoặc quét mã QR bên cạnh</div>
+                    <div>
+                        • Lớp : <span id="displayClass" class="navy-text font-semibold">Chưa nhập</span> &nbsp; 
+                        • Mã phòng : <span id="displayRoom" class="text-red-700 font-bold bg-yellow-100 px-2 py-0.5 rounded border border-yellow-300">...</span> &nbsp; 
+                        Đã vào phòng : <span id="onlineCount" class="navy-text font-semibold">0</span> thí sinh
+                    </div>
+                    <div>• Địa chỉ truy cập : <a id="displayIp" href="#" target="_blank" class="navy-text font-semibold hover:underline">Đang kết nối...</a> hoặc quét mã QR bên cạnh</div>
                     <div>• Cấu hình : <span id="displayNumMcq" class="navy-text font-semibold">...</span> câu Trắc nghiệm và <span id="displayNumTf" class="navy-text font-semibold">...</span> câu Đúng/Sai</div>
                     <div>• Thời gian : <span id="displayDuration" class="navy-text font-semibold">...</span> phút</div>
                 </div>
@@ -101,7 +105,7 @@
 
         <!-- 3 NÚT DƯỚI CÙNG -->
         <div class="flex justify-end gap-2 mt-4">
-            <!-- NÚT HƯỚNG DẪN SỬ DỤNG MỚI (THEME NAVY SÀNH ĐIỆU) -->
+            <!-- NÚT HƯỚNG DẪN SỬ DỤNG (THEME NAVY SÀNH ĐIỆU) -->
             <button onclick="showGuideModal()" class="bg-[#0B5082] hover:bg-[#083b61] text-white font-semibold py-1.5 px-3 rounded shadow text-xs flex items-center gap-1.5 transition cursor-pointer border border-sky-600">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -232,11 +236,18 @@
 
     <script>
         const socket = io();
-        let totalMcqAvailable = 0;
-        let totalTfAvailable = 0;
         let examCountdownTimer = null;
 
+        // TỰ ĐỘNG CẤP HOẶC TÁI SỬ DỤNG MÃ PHÒNG (ROOM PIN 6 CHỮ SỐ)
+        let currentRoom = sessionStorage.getItem('current_room_id');
+        if (!currentRoom) {
+            currentRoom = Math.floor(100000 + Math.random() * 900000).toString();
+            sessionStorage.setItem('current_room_id', currentRoom);
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('displayRoom').innerText = currentRoom;
+            socket.emit('join_teacher', { room: currentRoom });
             khoiTaoDuongDanHocSinh();
 
             Swal.fire({
@@ -271,16 +282,16 @@
         });
 
         function khoiTaoDuongDanHocSinh() {
-            fetch('/api/get_ip')
+            fetch(`/api/get_ip?room=${currentRoom}`)
                 .then(r => r.json())
                 .then(data => {
-                    const studentUrl = data.url || `${window.location.origin}/student`;
+                    const studentUrl = data.url || `${window.location.origin}/student?room=${currentRoom}`;
                     const displayIpEl = document.getElementById('displayIp');
                     displayIpEl.innerText = studentUrl;
                     displayIpEl.href = studentUrl;
                 })
                 .catch(() => {
-                    const fallbackUrl = `${window.location.origin}/student`;
+                    const fallbackUrl = `${window.location.origin}/student?room=${currentRoom}`;
                     const displayIpEl = document.getElementById('displayIp');
                     displayIpEl.innerText = fallbackUrl;
                     displayIpEl.href = fallbackUrl;
@@ -288,10 +299,10 @@
         }
 
         function generateQR() {
-            fetch('/api/get_ip')
+            fetch(`/api/get_ip?room=${currentRoom}`)
                 .then(r => r.json())
                 .then(data => {
-                    const studentUrl = data.url || `${window.location.origin}/student`;
+                    const studentUrl = data.url || `${window.location.origin}/student?room=${currentRoom}`;
                     const displayIpEl = document.getElementById('displayIp');
                     displayIpEl.innerText = studentUrl;
                     displayIpEl.href = studentUrl;
@@ -310,7 +321,7 @@
                     });
                 })
                 .catch(() => {
-                    const fallbackUrl = `${window.location.origin}/student`;
+                    const fallbackUrl = `${window.location.origin}/student?room=${currentRoom}`;
                     const qrContainer = document.getElementById('qrcode');
                     qrContainer.innerHTML = "";
                     const parentBox = qrContainer.parentElement;
@@ -329,6 +340,7 @@
             if (!file) return;
             const formData = new FormData();
             formData.append('file', file);
+            formData.append('room', currentRoom);
 
             fetch('/api/upload_bank', { method: 'POST', body: formData })
                 .then(r => r.json())
@@ -376,6 +388,7 @@
 
         function saveSubform() {
             const payload = {
+                room: currentRoom,
                 class_name: document.getElementById('displayClass').innerText.trim(),
                 num_mcq: parseInt(document.getElementById('subNumMcq').value) || 0,
                 score_mcq: parseFloat(document.getElementById('subScoreMcq').value) || 0,
@@ -420,7 +433,7 @@
         }
 
         function startExam() {
-            socket.emit('teacher_start_exam');
+            socket.emit('teacher_start_exam', { room: currentRoom });
             const btn = document.getElementById('btnStartExam');
             btn.innerText = "Đang diễn ra ca thi...";
             btn.disabled = true;
@@ -476,8 +489,8 @@
                 }
             });
 
-            // Tự động tải file nén kết quả
-            window.location.href = '/api/download_all_results';
+            // Tự động tải file nén kết quả của đúng phòng này
+            window.location.href = `/api/download_all_results?room=${currentRoom}`;
 
             setTimeout(() => {
                 Swal.close();
@@ -488,7 +501,7 @@
         function taoCaThiMoi() {
             Swal.fire({
                 title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Tạo mới ca thi?</span>',
-                html: '<span style="font-size: 14px; color: #4b5563;">Toàn bộ danh sách và kết quả bài làm cũ sẽ được làm sạch để đón thí sinh mới.</span>',
+                html: '<span style="font-size: 14px; color: #4b5563;">Hệ thống sẽ làm sạch dữ liệu phòng hiện tại và sẵn sàng đón thí sinh mới.</span>',
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#0b3c6d',
@@ -503,12 +516,14 @@
                 }
             }).then((result) => {
                 if (result.isConfirmed) {
-                    fetch('/api/reset_exam', { method: 'POST' })
-                        .finally(() => {
-                            localStorage.clear();
-                            sessionStorage.clear();
-                            window.location.reload();
-                        });
+                    fetch('/api/reset_exam', { 
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ room: currentRoom })
+                    }).finally(() => {
+                        sessionStorage.removeItem('current_room_id');
+                        window.location.reload();
+                    });
                 }
             });
         }
@@ -547,45 +562,45 @@
             });
         }
 
-// HÀM HIỂN THỊ POPUP HƯỚNG DẪN SỬ DỤNG
-function showGuideModal() {
-     Swal.fire({
-     title: '<span style="color:#0b3c6d; font-weight:bold; font-size:18px;">HƯỚNG DẪN TỔ CHỨC KIỂM TRA ONLINE</span>',
-     html: `
-     <div style="text-align: left; font-size: 13px; line-height: 1.6; color: #333; max-height: 65vh; overflow-y: auto; padding-right: 6px;">
-<div style="background: #fff8e6; border-left: 4px solid #d97706; padding: 10px; border-radius: 4px;">
-<b style="color: #b45309;">CHUẨN ĐỊNH DẠNG FILE WORD (.DOCX):</b>
-<p style="margin: 4px 0;"> Phần đầu trắc nghiệm nhiều lựa chọn này ghi chữ &nbsp;<code><b> G1 </b></code></p>
-<pre style="background: #fff; border: 1px solid #ddd; padding: 6px; border-radius: 4px; font-size: 11.5px; margin: 4px 0;">
+        // HÀM HIỂN THỊ POPUP HƯỚNG DẪN SỬ DỤNG
+        function showGuideModal() {
+            Swal.fire({
+                title: '<span style="color:#0b3c6d; font-weight:bold; font-size:18px;">HƯỚNG DẪN TỔ CHỨC KIỂM TRA ONLINE</span>',
+                html: `
+                    <div style="text-align: left; font-size: 13px; line-height: 1.6; color: #333; max-height: 65vh; overflow-y: auto; padding-right: 6px;">
+                        <div style="background: #fff8e6; border-left: 4px solid #d97706; padding: 10px; border-radius: 4px;">
+                            <b style="color: #b45309;">CHUẨN ĐỊNH DẠNG FILE WORD (.DOCX):</b>
+                            <p style="margin: 4px 0;"> Phần đầu trắc nghiệm nhiều lựa chọn này ghi chữ &nbsp;<code><b> G1 </b></code></p>
+                            <pre style="background: #fff; border: 1px solid #ddd; padding: 6px; border-radius: 4px; font-size: 11.5px; margin: 4px 0;">
 Câu 1. Thủ đô của Việt Nam là gì?
 #A. Hà Nội
 B. Huế
 C. Đà Nẵng
 D. Cần Thơ
 Câu 2. ...........</pre>
-<br>
-<p style="margin: 8px 0 4px 0;"> Phần đầu trắc nghiệm Đ/S này ghi chữ &nbsp;<code><b> G2 </b></code> </p>
-<pre style="background: #fff; border: 1px solid #ddd; padding: 6px; border-radius: 4px; font-size: 11.5px; margin: 4px 0;">
+                            <br>
+                            <p style="margin: 8px 0 4px 0;"> Phần đầu trắc nghiệm Đ/S này ghi chữ &nbsp;<code><b> G2 </b></code> </p>
+                            <pre style="background: #fff; border: 1px solid #ddd; padding: 6px; border-radius: 4px; font-size: 11.5px; margin: 4px 0;">
 Câu 1. Nội dung câu hỏi hoặc đọc đoạn tư liệu...
 *a) Ý này là Đúng
 b) Ý này là Sai
 *c) Ý này là Đúng
 d) Ý này là Sai
 Câu 2. ...........</pre>
-<br>
-</div>
+                            <br>
+                        </div>
                         
-<div style="background: #f0f7ff; border-left: 4px solid #0b3c6d; padding: 10px; margin-bottom: 12px; border-radius: 4px;">
-<b style="color: #0b3c6d;">QUY TRÌNH 5 BƯỚC TỔ CHỨC CA THI:</b>
-    <ol style="margin: 6px 0 0 16px; padding: 0;">
-    <li><b>Bước 1:</b> Bấm <b>Import ngân hàng đề</b> để nạp file Word (<code>.docx</code>). Số câu trong ngân hàng đề có thể nhiều hơn hoặc bằng số câu muốn tạo đề kiểm tra.</li>
-    <li><b>Bước 2:</b> Bấm <b>AI tạo đề kiểm tra</b> để cấu hình: Lớp, số lượng câu, thang điểm và thời gian làm bài.</li>
-    <li><b>Bước 3:</b> Bấm <b>Tạo/Quét mã QR vào phòng thi</b> để học sinh dùng Zalo quét mã trên điện thoại hoặc nhập link tương ứng bên cạch để vào phòng chờ (Nếu dùng Laptop)</li>
-    <li><b>Bước 4:</b> Bấm <b>Bắt đầu làm bài</b> để chuyển học sinh từ phòng chờ vào phòng thi. Khi hết giờ máy chủ tự động thu bài và khóa điểm.</li>
-    <li><b>Bước 5:</b> Bấm <b>Tải kết quả thi</b> về dạng tệp nén trong đó có chứa bảng điểm Excel và toàn bộ bài làm học sinh.</li>
-    </ol>
-</div>
-</div>
+                        <div style="background: #f0f7ff; border-left: 4px solid #0b3c6d; padding: 10px; margin-bottom: 12px; border-radius: 4px;">
+                            <b style="color: #0b3c6d;">QUY TRÌNH 5 BƯỚC TỔ CHỨC CA THI:</b>
+                            <ol style="margin: 6px 0 0 16px; padding: 0;">
+                                <li><b>Bước 1:</b> Bấm <b>Import ngân hàng đề</b> để nạp file Word (<code>.docx</code>). Số câu trong ngân hàng đề có thể nhiều hơn hoặc bằng số câu muốn tạo đề kiểm tra.</li>
+                                <li><b>Bước 2:</b> Bấm <b>AI tạo đề kiểm tra</b> để cấu hình: Lớp, số lượng câu, thang điểm và thời gian làm bài.</li>
+                                <li><b>Bước 3:</b> Bấm <b>Tạo/Quét mã QR vào phòng thi</b> để học sinh dùng Zalo quét mã trên điện thoại hoặc nhập link tương ứng bên cạnh để vào phòng chờ (Nếu dùng Laptop)</li>
+                                <li><b>Bước 4:</b> Bấm <b>Bắt đầu làm bài</b> để chuyển học sinh từ phòng chờ vào phòng thi. Khi hết giờ máy chủ tự động thu bài và khóa điểm.</li>
+                                <li><b>Bước 5:</b> Bấm <b>Tải kết quả thi</b> về dạng tệp nén trong đó có chứa bảng điểm Excel và toàn bộ bài làm học sinh.</li>
+                            </ol>
+                        </div>
+                    </div>
                 `,
                 width: '640px',
                 confirmButtonText: 'Đã hiểu',
