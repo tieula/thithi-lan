@@ -61,7 +61,7 @@
                         Đã vào phòng : <span id="onlineCount" class="navy-text font-semibold">0</span> thí sinh
                     </div>
                     <div>• Địa chỉ truy cập : <a id="displayIp" href="#" target="_blank" class="navy-text font-semibold hover:underline">Đang kết nối...</a> hoặc quét mã QR bên cạnh</div>
-                    <div>• Cấu hình : <span id="displayNumMcq" class="navy-text font-semibold">...</span> câu Trắc nghiệm và <span id="displayNumTf" class="navy-text font-semibold">...</span> câu Đúng/Sai</div>
+                    <div>• Cấu hình : <span id="displayNumMcq" class="navy-text font-semibold">...</span> câu Trắc nghiệm, <span id="displayNumTf" class="navy-text font-semibold">...</span> câu Đúng/Sai và <span id="displayNumSa" class="navy-text font-semibold">...</span> câu Trả lời ngắn</div>
                     <div>• Thời gian : <span id="displayDuration" class="navy-text font-semibold">...</span> phút</div>
                 </div>
             </div>
@@ -123,7 +123,7 @@
 
     <!-- MODAL CẤU HÌNH -->
     <div id="subformModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center p-3 z-50">
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-5 text-sm space-y-3">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-5 text-sm space-y-3 max-h-[90vh] overflow-y-auto">
             <h3 class="font-bold text-base navy-text border-b pb-2">CẤU HÌNH TẠO ĐỀ KIỂM TRA</h3>
             <div>
                 <label class="block font-medium">Tên ngân hàng đề:</label>
@@ -155,7 +155,7 @@
                 <input type="number" id="subDuration" class="w-full border p-1.5 rounded" value="15" min="1">
             </div>
 
-            <!-- Cấu hình Trắc nghiệm -->
+            <!-- Cấu hình Phần 1: Trắc nghiệm -->
             <div class="p-2 border rounded bg-gray-50">
                 <div class="grid grid-cols-3 gap-2">
                     <div>
@@ -173,7 +173,7 @@
                 </div>
             </div>
 
-            <!-- Cấu hình Đúng sai -->
+            <!-- Cấu hình Phần 2: Đúng sai -->
             <div class="p-2 border rounded bg-gray-50">
                 <div class="grid grid-cols-3 gap-2">
                     <div>
@@ -187,6 +187,24 @@
                     <div>
                         <label class="block text-xs font-semibold">Điểm/câu:</label>
                         <input type="text" id="subPptTf" class="w-full bg-gray-200 border p-1 rounded text-center" readonly value="1.500">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cấu hình Phần 3: Trả lời ngắn (G3) -->
+            <div class="p-2 border rounded bg-gray-50">
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <label class="block text-xs font-semibold">Số câu TL ngắn:</label>
+                        <input type="number" id="subNumSa" class="w-full border p-1 rounded" value="0" min="0" oninput="calculatePoints()">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold">Tổng điểm TL ngắn:</label>
+                        <input type="number" id="subScoreSa" class="w-full border p-1 rounded" value="0.0" step="0.1" oninput="calculatePoints()">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold">Điểm/câu:</label>
+                        <input type="text" id="subPptSa" class="w-full bg-gray-200 border p-1 rounded text-center" readonly value="0.000">
                     </div>
                 </div>
             </div>
@@ -349,15 +367,16 @@
                         document.getElementById('subBankName').value = data.filename;
                         document.getElementById('subNumMcq').value = data.total_mcq;
                         document.getElementById('subNumTf').value = data.total_tf;
+                        document.getElementById('subNumSa').value = data.total_sa || 0;
                         calculatePoints();
 
                         Swal.fire({
                             icon: 'success',
                             title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Import thành công !</span>',
-                            html: `<span style="font-size: 14px; color: #4b5563;">Đã nạp <b>${data.total_mcq}</b> câu Trắc nghiệm & <b>${data.total_tf}</b> câu Đúng/Sai</span>`,
+                            html: `<span style="font-size: 14px; color: #4b5563;">Đã nạp <b>${data.total_mcq}</b> câu TN, <b>${data.total_tf}</b> câu Đ/S & <b>${data.total_sa || 0}</b> câu TL ngắn</span>`,
                             confirmButtonColor: '#0b3c6d',
                             confirmButtonText: 'Đóng',
-                            width: '400px',
+                            width: '420px',
                             padding: '1rem',
                             customClass: {
                                 confirmButton: 'text-xs px-5 py-1.5 rounded shadow'
@@ -377,13 +396,17 @@
         }
 
         function calculatePoints() {
-            const nMcq = parseFloat(document.getElementById('subNumMcq').value) || 1;
+            const nMcq = parseFloat(document.getElementById('subNumMcq').value) || 0;
             const sMcq = parseFloat(document.getElementById('subScoreMcq').value) || 0;
-            document.getElementById('subPptMcq').value = (sMcq / nMcq).toFixed(3);
+            document.getElementById('subPptMcq').value = nMcq > 0 ? (sMcq / nMcq).toFixed(3) : "0.000";
 
-            const nTf = parseFloat(document.getElementById('subNumTf').value) || 1;
+            const nTf = parseFloat(document.getElementById('subNumTf').value) || 0;
             const sTf = parseFloat(document.getElementById('subScoreTf').value) || 0;
-            document.getElementById('subPptTf').value = (sTf / nTf).toFixed(3);
+            document.getElementById('subPptTf').value = nTf > 0 ? (sTf / nTf).toFixed(3) : "0.000";
+
+            const nSa = parseFloat(document.getElementById('subNumSa').value) || 0;
+            const sSa = parseFloat(document.getElementById('subScoreSa').value) || 0;
+            document.getElementById('subPptSa').value = nSa > 0 ? (sSa / nSa).toFixed(3) : "0.000";
         }
 
         function saveSubform() {
@@ -394,6 +417,8 @@
                 score_mcq: parseFloat(document.getElementById('subScoreMcq').value) || 0,
                 num_tf: parseInt(document.getElementById('subNumTf').value) || 0,
                 score_tf: parseFloat(document.getElementById('subScoreTf').value) || 0,
+                num_sa: parseInt(document.getElementById('subNumSa').value) || 0,
+                score_sa: parseFloat(document.getElementById('subScoreSa').value) || 0,
                 duration: parseInt(document.getElementById('subDuration').value) || 15,
                 tf_scale: {
                     "1": (parseFloat(document.getElementById('subTfP1').value) || 0) / 100,
@@ -410,6 +435,7 @@
             }).then(() => {
                 document.getElementById('displayNumMcq').innerText = payload.num_mcq;
                 document.getElementById('displayNumTf').innerText = payload.num_tf;
+                document.getElementById('displayNumSa').innerText = payload.num_sa;
                 document.getElementById('displayDuration').innerText = payload.duration;
                 closeSubform();
                 
@@ -501,7 +527,7 @@
         function taoCaThiMoi() {
             Swal.fire({
                 title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Tạo mới ca thi?</span>',
-                html: '<span style="font-size: 14px; color: #4b5563;">Hệ thống sẽ làm sạch dữ liệu phòng hiện tại và sẵn sàng đón thí sinh mới.</span>',
+                html: '<span style="font-size: 14px; color: #4b5563;">Toàn bộ danh sách và kết quả bài làm cũ sẽ được làm sạch để đón thí sinh mới.</span>',
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#0b3c6d',
