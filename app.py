@@ -469,28 +469,36 @@ def upload_bank():
             continue
 
         if current_mode == 'g1':
-            match_opt = re.match(r'^(#?)([A-Da-d])[\.\)]\s*(.*)', line)
+            match_opt = re.match(r'^(#?)\s*([A-Da-d])[\.\)]\s*(.*)', line)
             if match_opt:
                 if not curr_q:
                     return jsonify({"success": False, "error": f"Lỗi tại phương án: '{line}'. Chưa có câu hỏi!"})
                 is_correct = bool(match_opt.group(1) == '#')
                 curr_q['options'].append({"key": match_opt.group(2).upper(), "text": match_opt.group(3), "correct": is_correct})
             else:
-                if curr_q: mcq_questions.append(curr_q)
-                q_counter_mcq += 1
-                curr_q = {"id": q_counter_mcq, "type": "mcq", "question": line, "options": []}
+                is_new_q = re.match(r'^câu\s*\d+', lower_line) or (curr_q is None)
+                if is_new_q:
+                    if curr_q: mcq_questions.append(curr_q)
+                    q_counter_mcq += 1
+                    curr_q = {"id": q_counter_mcq, "type": "mcq", "question": line, "options": []}
+                else:
+                    curr_q["question"] += "\n" + line
 
         elif current_mode == 'g2':
-            match_tf_opt = re.match(r'^(\*?)([a-d])[\.\)]\s*(.*)', line)
+            match_tf_opt = re.match(r'^(\*?)\s*([a-dA-D])[\.\)]\s*(.*)', line)
             if match_tf_opt:
                 if not curr_q:
                     return jsonify({"success": False, "error": f"Lỗi tại ý Đ/S: '{line}'. Chưa có câu hỏi!"})
                 is_correct = bool(match_tf_opt.group(1) == '*')
                 curr_q['sub_items'].append({"key": match_tf_opt.group(2).lower(), "text": match_tf_opt.group(3), "correct": is_correct})
             else:
-                if curr_q: tf_questions.append(curr_q)
-                q_counter_tf += 1
-                curr_q = {"id": q_counter_tf, "type": "tf", "question": line, "sub_items": []}
+                is_new_q = re.match(r'^câu\s*\d+', lower_line) or (curr_q is None)
+                if is_new_q:
+                    if curr_q: tf_questions.append(curr_q)
+                    q_counter_tf += 1
+                    curr_q = {"id": q_counter_tf, "type": "tf", "question": line, "sub_items": []}
+                else:
+                    curr_q["question"] += "\n" + line
 
     if curr_q:
         if current_mode == 'g1': mcq_questions.append(curr_q)
