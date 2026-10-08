@@ -15,16 +15,10 @@
         .navy-btn { background-color: #0b3c6d; color: #ffffff; }
         .navy-btn:hover { background-color: #082d52; }
 
-        .swal2-icon.swal2-success {
-            border-color: #0b3c6d !important;
-        }
+        .swal2-icon.swal2-success { border-color: #0b3c6d !important; }
         .swal2-icon.swal2-success .swal2-success-line-tip,
-        .swal2-icon.swal2-success .swal2-success-line-long {
-            background-color: #0b3c6d !important;
-        }
-        .swal2-icon.swal2-success .swal2-success-ring {
-            border-color: rgba(11, 60, 109, 0.3) !important;
-        }
+        .swal2-icon.swal2-success .swal2-success-line-long { background-color: #0b3c6d !important; }
+        .swal2-icon.swal2-success .swal2-success-ring { border-color: rgba(11, 60, 109, 0.3) !important; }
         .swal2-icon.swal2-info, .swal2-icon.swal2-warning, .swal2-icon.swal2-question {
             border-color: #0b3c6d !important;
             color: #0b3c6d !important;
@@ -37,10 +31,17 @@
     <div id="loginScreen" class="flex-1 flex items-center justify-center p-4">
         <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-sm space-y-4">
             <h2 class="text-xl font-bold text-center text-blue-900 border-b pb-2">ĐĂNG NHẬP CA THI</h2>
+            
+            <div id="roomInputContainer" class="hidden">
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Mã phòng thi:</label>
+                <input type="text" id="roomCode" placeholder="Nhập mã phòng do giáo viên cung cấp..." class="w-full border-2 border-yellow-400 p-2.5 rounded focus:outline-none focus:border-yellow-600 font-bold text-center tracking-widest text-lg">
+            </div>
+
             <div>
                 <label class="block text-sm font-semibold text-gray-700 mb-1">Họ và tên thí sinh:</label>
                 <input type="text" id="studentName" placeholder="Nhập đầy đủ họ và tên..." class="w-full border-2 border-blue-400 p-2.5 rounded focus:outline-none focus:border-blue-700 font-medium">
             </div>
+            
             <button onclick="joinExam()" class="w-full navy-btn font-bold py-2.5 rounded shadow transition">
                 Vào phòng thi
             </button>
@@ -51,7 +52,7 @@
     <div id="waitingScreen" class="hidden flex-1 flex flex-col items-center justify-center p-4 text-center space-y-3">
         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div>
         <h3 class="text-lg font-bold text-gray-800">Đã vào phòng chờ thành công!</h3>
-        <p class="text-sm text-gray-600">Vui lòng giữ nguyên màn hình, đề thi sẽ tự động hiển thị khi giáo viên bắt đầu.</p>
+        <p class="text-sm text-gray-600">Vui lòng giữ nguyên màn hình, đề thi sẽ tự động hiển thị khi giáo viên bấm bắt đầu.</p>
     </div>
 
     <!-- 3. MÀN HÌNH LÀM BÀI -->
@@ -88,6 +89,10 @@
             timeout: 10000
         });
 
+        // BẮT MÃ PHÒNG TỪ URL HOẶC SESSION
+        const urlParams = new URLSearchParams(window.location.search);
+        let currentRoom = urlParams.get('room') || sessionStorage.getItem('lan_exam_room') || '';
+
         let currentStudentName = "";
         let studentAnswers = {};
         let timerInterval = null;
@@ -101,9 +106,32 @@
             if (savedName) {
                 document.getElementById('studentName').value = savedName;
             }
+
+            // Nếu link không có ?room= thì hiện ô nhập mã phòng
+            if (!currentRoom) {
+                document.getElementById('roomInputContainer').classList.remove('hidden');
+            } else {
+                sessionStorage.setItem('lan_exam_room', currentRoom);
+            }
         });
 
         function joinExam() {
+            // Kiểm tra mã phòng nếu cần nhập tay
+            if (!currentRoom) {
+                const roomInput = document.getElementById('roomCode').value.trim();
+                if (!roomInput) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'Thiếu thông tin',
+                        text: 'Vui lòng nhập Mã phòng thi do giáo viên cung cấp!',
+                        confirmButtonColor: '#0b3c6d'
+                    });
+                    return;
+                }
+                currentRoom = roomInput;
+                sessionStorage.setItem('lan_exam_room', currentRoom);
+            }
+
             const nameInput = document.getElementById('studentName').value.trim();
             if (!nameInput) {
                 Swal.fire({
@@ -120,15 +148,22 @@
             sessionStorage.setItem('lan_exam_student_name', currentStudentName);
             document.getElementById('headerStudentName').innerText = currentStudentName;
 
-            socket.emit('join_student', { name: currentStudentName });
+            // GỬI KÈM MÃ PHÒNG KHI VÀO THI
+            socket.emit('join_student', { 
+                name: currentStudentName, 
+                room: currentRoom 
+            });
 
             document.getElementById('loginScreen').classList.add('hidden');
             document.getElementById('waitingScreen').classList.remove('hidden');
         }
 
         socket.on('connect', () => {
-            if (currentStudentName && !isSubmitted) {
-                socket.emit('join_student', { name: currentStudentName });
+            if (currentStudentName && !isSubmitted && currentRoom) {
+                socket.emit('join_student', { 
+                    name: currentStudentName, 
+                    room: currentRoom 
+                });
             }
         });
 
@@ -136,7 +171,7 @@
             Swal.fire({
                 icon: 'warning',
                 title: 'THÔNG BÁO',
-                text: data.message || 'Bạn đã thi rồi!',
+                text: data.message || 'Bạn đã hoàn thành bài thi trong phòng này!',
                 confirmButtonColor: '#0b3c6d',
                 confirmButtonText: 'Đã hiểu',
                 allowOutsideClick: false
@@ -145,7 +180,7 @@
                     <div class="min-h-screen flex items-center justify-center bg-gray-100 p-4">
                         <div class="bg-white p-6 rounded shadow-md text-center max-w-sm">
                             <h2 class="text-xl font-bold text-red-600 mb-2">BẠN ĐÃ THI RỒI!</h2>
-                            <p class="text-gray-600 text-sm">Thiết bị này đã hoàn thành bài thi trong ca hiện tại.</p>
+                            <p class="text-gray-600 text-sm">Thiết bị này đã hoàn thành bài thi trong phòng hiện tại.</p>
                         </div>
                     </div>
                 `;
@@ -243,13 +278,13 @@
         function selectMcq(qId, key) {
             if (isSubmitted) return;
             studentAnswers[`mcq_${qId}`] = key;
-            socket.emit('sync_answer', { key: `mcq_${qId}`, val: key });
+            socket.emit('sync_answer', { key: `mcq_${qId}`, val: key, room: currentRoom });
         }
 
         function selectTf(qId, subKey, val) {
             if (isSubmitted) return;
             studentAnswers[`tf_${qId}_${subKey}`] = val;
-            socket.emit('sync_answer', { key: `tf_${qId}_${subKey}`, val: val });
+            socket.emit('sync_answer', { key: `tf_${qId}_${subKey}`, val: val, room: currentRoom });
         }
 
         function startCountdown() {
@@ -262,7 +297,7 @@
                 updateTimerDisplay(diff);
 
                 if (diff % 5 === 0 && diff > 0) {
-                    socket.emit('sync_timer', { time_left: diff });
+                    socket.emit('sync_timer', { time_left: diff, room: currentRoom });
                 }
 
                 if (diff <= 0) {
@@ -330,7 +365,8 @@
 
             const submissionPayload = {
                 name: currentStudentName || document.getElementById('headerStudentName').innerText,
-                answers: studentAnswers
+                answers: studentAnswers,
+                room: currentRoom
             };
 
             const send = () => {
@@ -377,14 +413,15 @@
             if (isExamActive && !isSubmitted) {
                 socket.emit('submit_exam', {
                     name: currentStudentName || document.getElementById('headerStudentName').innerText,
-                    answers: studentAnswers
+                    answers: studentAnswers,
+                    room: currentRoom
                 });
             }
         });
 
         function recordViolation() {
             if (isExamActive && !isSubmitted) {
-                socket.emit('report_violation');
+                socket.emit('report_violation', { room: currentRoom });
                 Swal.fire({
                     icon: 'warning',
                     title: 'CẢNH BÁO VI PHẠM!',
