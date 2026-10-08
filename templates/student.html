@@ -107,7 +107,6 @@
                 document.getElementById('studentName').value = savedName;
             }
 
-            // Nếu link không có ?room= thì hiện ô nhập mã phòng
             if (!currentRoom) {
                 document.getElementById('roomInputContainer').classList.remove('hidden');
             } else {
@@ -116,7 +115,6 @@
         });
 
         function joinExam() {
-            // Kiểm tra mã phòng nếu cần nhập tay
             if (!currentRoom) {
                 const roomInput = document.getElementById('roomCode').value.trim();
                 if (!roomInput) {
@@ -148,7 +146,6 @@
             sessionStorage.setItem('lan_exam_student_name', currentStudentName);
             document.getElementById('headerStudentName').innerText = currentStudentName;
 
-            // GỬI KÈM MÃ PHÒNG KHI VÀO THI
             socket.emit('join_student', { 
                 name: currentStudentName, 
                 room: currentRoom 
@@ -195,7 +192,7 @@
             document.getElementById('loginScreen').classList.add('hidden');
             document.getElementById('examScreen').classList.remove('hidden');
 
-            renderQuestions(payload.mcq, payload.tf);
+            renderQuestions(payload.mcq, payload.tf, payload.sa);
 
             const durationSec = payload.time_left !== undefined ? payload.time_left : (payload.duration * 60);
             targetEndTime = Date.now() + (durationSec * 1000);
@@ -207,10 +204,11 @@
             return text.replace(/^(câu\s*\d+[\s\:\.\-\)]*)\s*/i, '').trim();
         }
 
-        function renderQuestions(mcqs, tfs) {
+        function renderQuestions(mcqs, tfs, sas) {
             const container = document.getElementById('questionsContainer');
             container.innerHTML = '';
 
+            // PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN
             if (mcqs && mcqs.length > 0) {
                 const header1 = document.createElement('div');
                 header1.className = "font-bold text-sm text-blue-900 border-b-2 border-blue-900 pb-1";
@@ -238,6 +236,7 @@
                 });
             }
 
+            // PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI
             if (tfs && tfs.length > 0) {
                 const header2 = document.createElement('div');
                 header2.className = "font-bold text-sm text-blue-900 border-b-2 border-blue-900 pb-1 mt-6";
@@ -273,6 +272,28 @@
                     container.appendChild(card);
                 });
             }
+
+            // PHẦN 3: CÂU HỎI TRẢ LỜI NGẮN (G3)
+            if (sas && sas.length > 0) {
+                const header3 = document.createElement('div');
+                header3.className = "font-bold text-sm text-blue-900 border-b-2 border-blue-900 pb-1 mt-6";
+                header3.innerText = "PHẦN 3: CÂU HỎI TRẢ LỜI NGẮN";
+                container.appendChild(header3);
+
+                sas.forEach((q, idx) => {
+                    const card = document.createElement('div');
+                    card.className = "bg-white p-4 rounded-lg shadow-sm border border-gray-200 space-y-3";
+                    const cleanTextSa = cleanQuestionTitle(q.question);
+                    card.innerHTML = `
+                        <div class="font-semibold text-gray-900">Câu ${idx + 1}: ${cleanTextSa}</div>
+                        <div class="pt-1">
+                            <label class="block text-xs text-gray-500 mb-1 font-medium">Nhập câu trả lời của bạn:</label>
+                            <input type="text" id="sa_${q.id}" oninput="inputSa(${q.id}, this.value)" placeholder="Gõ câu trả lời vào đây..." class="w-full border-2 border-gray-300 p-2 rounded focus:outline-none focus:border-blue-700 text-sm font-semibold text-gray-800">
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            }
         }
 
         function selectMcq(qId, key) {
@@ -285,6 +306,12 @@
             if (isSubmitted) return;
             studentAnswers[`tf_${qId}_${subKey}`] = val;
             socket.emit('sync_answer', { key: `tf_${qId}_${subKey}`, val: val, room: currentRoom });
+        }
+
+        function inputSa(qId, val) {
+            if (isSubmitted) return;
+            studentAnswers[`sa_${qId}`] = val.trim();
+            socket.emit('sync_answer', { key: `sa_${qId}`, val: val.trim(), room: currentRoom });
         }
 
         function startCountdown() {
@@ -362,6 +389,7 @@
             btn.classList.replace('hover:bg-green-800', 'cursor-not-allowed');
 
             document.querySelectorAll('input[type="radio"]').forEach(el => el.disabled = true);
+            document.querySelectorAll('input[type="text"]').forEach(el => el.disabled = true);
 
             const submissionPayload = {
                 name: currentStudentName || document.getElementById('headerStudentName').innerText,
@@ -376,8 +404,6 @@
             };
 
             send();
-
-            // Thử gửi lại định kỳ nếu máy chủ chưa xác nhận
             retryInterval = setInterval(send, 2000);
 
             Swal.fire({
