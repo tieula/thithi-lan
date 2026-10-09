@@ -366,58 +366,30 @@
         });
 
         function khoiTaoDuongDanHocSinh() {
-            fetch(`/api/get_ip?room=${currentRoom}`)
-                .then(r => r.json())
-                .then(data => {
-                    const studentUrl = data.url || `${window.location.origin}/student?room=${currentRoom}`;
-                    const displayIpEl = document.getElementById('displayIp');
-                    displayIpEl.innerText = studentUrl;
-                    displayIpEl.href = studentUrl;
-                })
-                .catch(() => {
-                    const fallbackUrl = `${window.location.origin}/student?room=${currentRoom}`;
-                    const displayIpEl = document.getElementById('displayIp');
-                    displayIpEl.innerText = fallbackUrl;
-                    displayIpEl.href = fallbackUrl;
-                });
+            const shortUrl = `${window.location.origin}/r/${currentRoom}`;
+            const displayIpEl = document.getElementById('displayIp');
+            displayIpEl.innerText = shortUrl;
+            displayIpEl.href = shortUrl;
         }
 
         function generateQR() {
-            fetch(`/api/get_ip?room=${currentRoom}`)
-                .then(r => r.json())
-                .then(data => {
-                    const studentUrl = data.url || `${window.location.origin}/student?room=${currentRoom}`;
-                    const displayIpEl = document.getElementById('displayIp');
-                    displayIpEl.innerText = studentUrl;
-                    displayIpEl.href = studentUrl;
-                    
-                    const qrContainer = document.getElementById('qrcode');
-                    qrContainer.innerHTML = "";
+            const shortUrl = `${window.location.origin}/r/${currentRoom}`;
+            const displayIpEl = document.getElementById('displayIp');
+            displayIpEl.innerText = shortUrl;
+            displayIpEl.href = shortUrl;
+            
+            const qrContainer = document.getElementById('qrcode');
+            qrContainer.innerHTML = "";
 
-                    const parentBox = qrContainer.parentElement;
-                    const size = Math.min(parentBox.clientWidth, parentBox.clientHeight) - 16;
+            const parentBox = qrContainer.parentElement;
+            const size = Math.min(parentBox.clientWidth, parentBox.clientHeight) - 16;
 
-                    new QRCode(qrContainer, {
-                        text: studentUrl,
-                        width: size,
-                        height: size,
-                        correctLevel: QRCode.CorrectLevel.H
-                    });
-                })
-                .catch(() => {
-                    const fallbackUrl = `${window.location.origin}/student?room=${currentRoom}`;
-                    const qrContainer = document.getElementById('qrcode');
-                    qrContainer.innerHTML = "";
-                    const parentBox = qrContainer.parentElement;
-                    const size = Math.min(parentBox.clientWidth, parentBox.clientHeight) - 16;
-
-                    new QRCode(qrContainer, {
-                        text: fallbackUrl,
-                        width: size,
-                        height: size,
-                        correctLevel: QRCode.CorrectLevel.H
-                    });
-                });
+            new QRCode(qrContainer, {
+                text: shortUrl,
+                width: size,
+                height: size,
+                correctLevel: QRCode.CorrectLevel.H
+            });
         }
 
         function uploadFileBank(event) {
@@ -660,7 +632,7 @@
             });
         }
 
-function showGuideModal() {
+        function showGuideModal() {
             Swal.fire({
                 title: '<span style="color:#0b3c6d; font-weight:bold; font-size:18px;">HƯỚNG DẪN TỔ CHỨC KIỂM TRA ONLINE</span>',
                 html: `
