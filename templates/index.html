@@ -37,60 +37,56 @@
             color: #0b3c6d !important;
         }
 
-        /* ĐỒNG HỒ ĐẾM NGƯỢC GÓC TRÊN BÊN PHẢI */
-        .teacher-timer-fixed {
-            position: fixed;
-            top: 14px;
-            right: 18px;
-            z-index: 99999;
-            background: linear-gradient(135deg, #0b3c6d, #145388);
-            color: #ffffff;
-            padding: 6px 16px;
-            border-radius: 10px;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-            border: 2px solid rgba(255, 255, 255, 0.4);
+        /* ĐỒNG HỒ TRONG THANH TIÊU ĐỀ NAVY */
+        .header-timer-box {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
             text-align: center;
             user-select: none;
-            transition: all 0.3s ease;
         }
-        .teacher-timer-fixed .timer-title {
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 1.5px;
+        .header-timer-label {
+            font-size: 11px;
+            color: #ffffff;
             opacity: 0.9;
-            text-transform: uppercase;
+            font-weight: 500;
+            margin-bottom: 1px;
+            letter-spacing: 0.5px;
         }
-        .teacher-timer-fixed .timer-digits {
+        .header-timer-digits {
             font-size: 26px;
             font-weight: 800;
             letter-spacing: 2px;
             color: #ffffff;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+            line-height: 1.1;
             font-variant-numeric: tabular-nums;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
         }
-        .teacher-timer-fixed.time-warning {
-            background: linear-gradient(135deg, #dc2626, #991b1b) !important;
-            border-color: #fca5a5 !important;
-            animation: timer-pulse 1s infinite alternate;
+        .time-warning-text {
+            color: #ffb4b4 !important;
+            animation: text-blink 1s infinite alternate;
         }
-        @keyframes timer-pulse {
-            from { transform: scale(1); box-shadow: 0 0 10px rgba(220, 38, 38, 0.6); }
-            to { transform: scale(1.04); box-shadow: 0 0 20px rgba(220, 38, 38, 0.9); }
+        @keyframes text-blink {
+            from { opacity: 1; }
+            to { opacity: 0.5; }
         }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col justify-between antialiased">
 
-    <!-- ĐỒNG HỒ ĐẾM NGƯỢC GÓC TRÊN BÊN PHẢI -->
-    <div id="teacher-timer-box" class="teacher-timer-fixed">
-        <div class="timer-title">THỜI GIAN CÒN LẠI</div>
-        <div id="teacher-timer-display" class="timer-digits">00:00:00</div>
-    </div>
-
     <div class="w-full max-w-5xl mx-auto p-4 flex-1">
-        <!-- HEADER -->
-        <div class="navy-header text-white text-center py-3 px-4 font-bold text-base md:text-lg rounded shadow">
-            HỆ THỐNG TỔ CHỨC KIỂM TRA ĐÁNH GIÁ TRẮC NGHIỆM ONLINE<br> TÍCH HỢP TRÍ TUỆ NHÂN TẠO TRÊN THIẾT BỊ DI ĐỘNG
+        <!-- HEADER CÓ TÍCH HỢP ĐỒNG HỒ GÓC PHẢI -->
+        <div class="navy-header text-white relative py-3 px-4 rounded shadow flex items-center justify-center">
+            <div class="text-center font-bold text-base md:text-lg leading-snug">
+                HỆ THỐNG TỔ CHỨC KIỂM TRA ĐÁNH GIÁ TRẮC NGHIỆM ONLINE<br> TÍCH HỢP TRÍ TUỆ NHÂN TẠO TRÊN THIẾT BỊ DI ĐỘNG
+            </div>
+            
+            <!-- ĐỒNG HỒ GÓC PHẢI -->
+            <div id="teacher-timer-box" class="header-timer-box">
+                <div class="header-timer-label">Thời gian còn lại</div>
+                <div id="teacher-timer-display" class="header-timer-digits">00:00:00</div>
+            </div>
         </div>
 
         <!-- THÔNG TIN & QR -->
@@ -313,15 +309,14 @@
 
         function updateTeacherTimerDisplay() {
             const displayEl = document.getElementById('teacher-timer-display');
-            const boxEl = document.getElementById('teacher-timer-box');
-            if (!displayEl || !boxEl) return;
+            if (!displayEl) return;
 
             displayEl.textContent = formatTeacherTime(teacherSecondsLeft);
 
             if (teacherSecondsLeft <= 60 && teacherSecondsLeft > 0) {
-                boxEl.classList.add('time-warning');
+                displayEl.classList.add('time-warning-text');
             } else {
-                boxEl.classList.remove('time-warning');
+                displayEl.classList.remove('time-warning-text');
             }
         }
 
@@ -508,7 +503,7 @@
                 document.getElementById('displayNumSa').innerText = payload.num_sa;
                 document.getElementById('displayDuration').innerText = payload.duration;
                 
-                // Cập nhật sẵn thời lượng lên đồng hồ trước khi bấm Bắt đầu
+                // Đồng bộ sẵn thời gian lên đồng hồ góc phải
                 teacherSecondsLeft = payload.duration * 60;
                 updateTeacherTimerDisplay();
 
@@ -583,7 +578,6 @@
             }, 1000);
         }
 
-        // TẢI TRỌN GÓI: FILE EXCEL BẢNG ĐIỂM + TOÀN BỘ FILE BÀI LÀM THÍ SINH DƯỚI DẠNG FILE ZIP
         function exportExcelResult() {
             Swal.fire({
                 title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Đang đóng gói kết quả...</span>',
@@ -601,7 +595,6 @@
             }, 2000);
         }
 
-        // HÀM TẠO CA THI MỚI
         function taoCaThiMoi() {
             Swal.fire({
                 title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Tạo mới ca thi?</span>',
@@ -632,7 +625,6 @@
             });
         }
 
-        // HÀM ĐÓNG TRANG WEB
         function dongTrangWeb() {
             Swal.fire({
                 title: '<span style="font-size: 17px; font-weight: bold; color: #0b3c6d;">Đóng hệ thống?</span>',
@@ -666,7 +658,6 @@
             });
         }
 
-        // HÀM HIỂN THỊ POPUP HƯỚNG DẪN SỬ DỤNG
         function showGuideModal() {
             Swal.fire({
                 title: '<span style="color:#0b3c6d; font-weight:bold; font-size:18px;">HƯỚNG DẪN TỔ CHỨC KIỂM TRA ONLINE</span>',
