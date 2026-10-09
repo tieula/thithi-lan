@@ -8,6 +8,15 @@ import time
 import random
 import copy
 import zipfile
+import cloudinary
+import cloudinary.uploader
+
+cloudinary.config(
+    cloud_name = "y0xsqdev",
+    api_key = "974245233197575",
+    api_secret = "tB1Y4FYGtYrv5We4OoeK8z-9-A0",
+    secure = True
+)
 from io import BytesIO
 from docx import Document
 from flask import Flask, render_template, request, jsonify, send_file
