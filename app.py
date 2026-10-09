@@ -8,22 +8,53 @@ import time
 import random
 import copy
 import zipfile
+from io import BytesIO
 import cloudinary
 import cloudinary.uploader
-
-cloudinary.config(
-    cloud_name = "y0xsqdev",
-    api_key = "974245233197575",
-    api_secret = "tB1Y4FYGtYrv5We4OoeK8z-9-A0",
-    secure = True
-)
-from io import BytesIO
 from docx import Document
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+
+# Cấu hình Cloudinary
+cloudinary.config(
+    cloud_name = "y0xsqdev",
+    api_key = "974245233197575",
+    api_secret = "tB1Y4FYGtYrv5We4OoeK8z-9-A0",
+    secure = True
+)
+
+def upload_image_to_cloudinary(image_bytes):
+    """Đẩy luồng byte của ảnh lên Cloudinary và trả về đường link web tối ưu"""
+    try:
+        res = cloudinary.uploader.upload(
+            image_bytes,
+            folder="thithi_lan",
+            transformation=[{'quality': 'auto', 'fetch_format': 'auto'}]
+        )
+        return res.get('secure_url')
+    except Exception as e:
+        print(f"Lỗi tải ảnh lên Cloudinary: {e}")
+        return ""
+
+def extract_paragraph_content(p, doc):
+    """Trích xuất cả chữ và hình ảnh trong 1 paragraph của Word"""
+    text_content = ""
+    for r in p.runs:
+        text_content += r.text
+        # Quét các thẻ đồ họa nhúng trong run
+        blips = r._r.xpath('.//a:blip')
+        for blip in blips:
+            rId = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+            if rId and rId in doc.part.rels:
+                image_part = doc.part.rels[rId].target_ref
+                image_data = doc.part.related_parts[image_part].blob
+                cloud_url = upload_image_to_cloudinary(image_data)
+                if cloud_url:
+                    text_content += f'<br><img src="{cloud_url}" class="exam-img" style="max-width:100%; height:auto; margin:8px 0; display:block;" /><br>'
+    return text_content
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'lan_exam_secret_key_2026'
@@ -86,7 +117,6 @@ def clear_submission_folder(room_id):
             except Exception:
                 pass
 
-# --- TIẾN TRÌNH TỰ ĐỘNG CHỐT BÀI PHÍA MÁY CHỦ CHO TỪNG PHÒNG ---
 def auto_exam_watcher():
     while True:
         eventlet.sleep(1)
@@ -147,7 +177,7 @@ def generate_individual_exam(room_data):
     random.shuffle(selected_tf_raw)
     random.shuffle(selected_sa_raw)
 
-    # 1. Xử lý Trắc nghiệm (G1)
+    # 1. Trắc nghiệm nhiều lựa chọn (G1)
     mcq_send, mcq_server = [], []
     labels = ['A', 'B', 'C', 'D']
     for idx, q in enumerate(selected_mcq_raw, 1):
@@ -163,7 +193,7 @@ def generate_individual_exam(room_data):
         mcq_send.append({"id": idx, "type": "mcq", "question": clean_q, "options": client_opts})
         mcq_server.append({"id": idx, "type": "mcq", "question": clean_q, "options": server_opts})
 
-    # 2. Xử lý Đúng / Sai (G2)
+    # 2. Đúng / Sai (G2)
     tf_send, tf_server = [], []
     for idx, q in enumerate(selected_tf_raw, 1):
         client_subs = [{"key": s["key"], "text": s["text"]} for s in q["sub_items"]]
@@ -172,7 +202,7 @@ def generate_individual_exam(room_data):
         tf_send.append({"id": idx, "type": "tf", "question": clean_q_tf, "sub_items": client_subs})
         tf_server.append({"id": idx, "type": "tf", "question": clean_q_tf, "sub_items": server_subs})
 
-    # 3. Xử lý Trả lời ngắn (G3)
+    # 3. Trả lời ngắn (G3)
     sa_send, sa_server = [], []
     for idx, q in enumerate(selected_sa_raw, 1):
         clean_q_sa = clean_question_text(q["question"])
@@ -316,7 +346,7 @@ def save_individual_submission(room_id, st, answers, score):
         f.write(f" Số lần vi phạm : {st['violations']}" + NL)
         f.write(f"Tổng điểm : {score} điểm" + NL)
   
-        # --- PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN ---
+        # PHẦN 1
         f.write("PHẦN 1: TRẮC NGHIỆM NHIỀU LỰA CHỌN" + NL)
         f.write("--------------------------------------------------------" + NL + NL)
         mcq_list = exam_data.get("mcq", [])
@@ -331,7 +361,7 @@ def save_individual_submission(room_id, st, answers, score):
             f.write(f"   Đáp án : {correct_opt}" + NL)
             f.write(NL)
 
-        # --- PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI ---
+        # PHẦN 2
         f.write(" PHẦN 2: TRẮC NGHIỆM ĐÚNG / SAI" + NL)
         f.write("---------------------------------------------" + NL + NL)
         tf_list = exam_data.get("tf", [])
@@ -345,7 +375,7 @@ def save_individual_submission(room_id, st, answers, score):
                 f.write(f"   Đáp án : {expected}" + NL)
             f.write(NL)
 
-        # --- PHẦN 3: TRẮC NGHIỆM TRẢ LỜI NGẮN ---
+        # PHẦN 3
         f.write(" PHẦN 3: CÂU HỎI TRẢ LỜI NGẮN" + NL)
         f.write("---------------------------------------------" + NL + NL)
         sa_list = exam_data.get("sa", [])
@@ -401,7 +431,7 @@ def process_grading(room_id, sid, answers=None, student_name=None):
 
     score = 0.0
 
-    # Chấm Phần 1 (MCQ)
+    # Chấm MCQ
     mcq_pts = room_data["active_exam"].get("score_per_mcq", 0.25)
     for q in student_exam.get("mcq", []):
         ans = answers.get(f"mcq_{q['id']}")
@@ -409,7 +439,7 @@ def process_grading(room_id, sid, answers=None, student_name=None):
         if ans and str(ans).strip().upper() == str(correct_opt).strip().upper():
             score += mcq_pts
 
-    # Chấm Phần 2 (Đúng / Sai)
+    # Chấm TF
     tf_pts = room_data["active_exam"].get("score_per_tf", 1.0)
     scale = room_data["active_exam"].get("tf_scale", {"1": 0.1, "2": 0.25, "3": 0.5, "4": 1.0})
     for q in student_exam.get("tf", []):
@@ -422,7 +452,7 @@ def process_grading(room_id, sid, answers=None, student_name=None):
         ratio = float(scale.get(str(correct_cnt), 0.0))
         score += tf_pts * ratio
 
-    # Chấm Phần 3 (Trả lời ngắn)
+    # Chấm SA
     sa_pts = room_data["active_exam"].get("score_per_sa", 0.0)
     for q in student_exam.get("sa", []):
         user_val = answers.get(f"sa_{q['id']}", "")
@@ -483,7 +513,8 @@ def upload_bank():
 
     paragraphs = []
     for p in doc.paragraphs:
-        for sub in p.text.split('\n'):
+        content = extract_paragraph_content(p, doc)
+        for sub in content.split('\n'):
             s = sub.strip()
             if s:
                 paragraphs.append(s)
@@ -525,7 +556,7 @@ def upload_bank():
             continue
 
         if current_mode == 'g1':
-            match_opt = re.match(r'^(#?)\s*([A-Da-d])[\.\)]\s*(.*)', line)
+            match_opt = re.match(r'^(#?)\s*([A-Da-d])[\.\)]\s*(.*)', line, re.DOTALL)
             if match_opt:
                 if not curr_q:
                     return jsonify({"success": False, "error": f"Lỗi tại phương án: '{line}'. Chưa có câu hỏi!"})
@@ -538,10 +569,10 @@ def upload_bank():
                     q_counter_mcq += 1
                     curr_q = {"id": q_counter_mcq, "type": "mcq", "question": line, "options": []}
                 else:
-                    curr_q["question"] += "\n" + line
+                    curr_q["question"] += "<br>" + line
 
         elif current_mode == 'g2':
-            match_tf_opt = re.match(r'^(\*?)\s*([a-dA-D])[\.\)]\s*(.*)', line)
+            match_tf_opt = re.match(r'^(\*?)\s*([a-dA-D])[\.\)]\s*(.*)', line, re.DOTALL)
             if match_tf_opt:
                 if not curr_q:
                     return jsonify({"success": False, "error": f"Lỗi tại ý Đ/S: '{line}'. Chưa có câu hỏi!"})
@@ -554,10 +585,9 @@ def upload_bank():
                     q_counter_tf += 1
                     curr_q = {"id": q_counter_tf, "type": "tf", "question": line, "sub_items": []}
                 else:
-                    curr_q["question"] += "\n" + line
+                    curr_q["question"] += "<br>" + line
 
         elif current_mode == 'g3':
-            # Nhận dạng đáp án trả lời ngắn bắt đầu bằng dấu # hoặc [ĐÁP ÁN]
             match_sa_ans = re.match(r'^(?:#|đáp\s*án\s*[\:\.]?\s*)(.+)', line, re.IGNORECASE)
             if match_sa_ans:
                 if not curr_q:
@@ -571,7 +601,7 @@ def upload_bank():
                     q_counter_sa += 1
                     curr_q = {"id": q_counter_sa, "type": "sa", "question": line, "answers": []}
                 else:
-                    curr_q["question"] += "\n" + line
+                    curr_q["question"] += "<br>" + line
 
     if curr_q:
         if current_mode == 'g1': mcq_questions.append(curr_q)
