@@ -54,22 +54,23 @@
             margin-bottom: 1px;
             letter-spacing: 0.5px;
         }
+        /* SỐ ĐỒNG HỒ MÀU VÀNG CAM NỔI BẬT */
         .header-timer-digits {
             font-size: 26px;
             font-weight: 800;
             letter-spacing: 2px;
-            color: #ffffff;
+            color: #fbbf24; /* Vàng cam */
             line-height: 1.1;
             font-variant-numeric: tabular-nums;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
         }
         .time-warning-text {
-            color: #ffb4b4 !important;
+            color: #ef4444 !important; /* Chuyển đỏ khi còn dưới 1 phút */
             animation: text-blink 1s infinite alternate;
         }
         @keyframes text-blink {
             from { opacity: 1; }
-            to { opacity: 0.5; }
+            to { opacity: 0.4; }
         }
     </style>
 </head>
@@ -148,7 +149,8 @@
 
         <!-- 3 NÚT DƯỚI CÙNG -->
         <div class="flex justify-end gap-2 mt-4">
-            <button onclick="showGuideModal()" class="bg-[#0B5082] hover:bg-[#083b61] text-white font-semibold py-1.5 px-3 rounded shadow text-xs flex items-center gap-1.5 transition cursor-pointer border border-sky-600">
+            <!-- NÚT HƯỚNG DẪN SỬ DỤNG: ĐỒNG MÀU NAVY -->
+            <button onclick="showGuideModal()" class="navy-btn font-semibold py-1.5 px-4 rounded shadow text-xs flex items-center gap-1.5 transition cursor-pointer">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                 </svg>
@@ -503,7 +505,7 @@
                 document.getElementById('displayNumSa').innerText = payload.num_sa;
                 document.getElementById('displayDuration').innerText = payload.duration;
                 
-                // Đồng bộ sẵn thời gian lên đồng hồ góc phải
+                // Cập nhật sẵn thời gian lên đồng hồ góc phải
                 teacherSecondsLeft = payload.duration * 60;
                 updateTeacherTimerDisplay();
 
