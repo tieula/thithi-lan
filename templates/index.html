@@ -660,11 +660,12 @@
             });
         }
 
-        function showGuideModal() {
+function showGuideModal() {
             Swal.fire({
                 title: '<span style="color:#0b3c6d; font-weight:bold; font-size:18px;">HƯỚNG DẪN TỔ CHỨC KIỂM TRA ONLINE</span>',
                 html: `
                     <div style="text-align: left; font-size: 13px; line-height: 1.6; color: #333; max-height: 65vh; overflow-y: auto; overflow-x: hidden; padding-right: 6px;">
+                        <!-- KHỐI 1: CHUẨN ĐỊNH DẠNG FILE WORD -->
                         <div style="background: #fff8e6; border-left: 4px solid #d97706; padding: 10px; border-radius: 4px; margin-bottom: 12px;">
                             <b style="color: #b45309;">CHUẨN ĐỊNH DẠNG FILE WORD (.DOCX):</b>
                             <p style="margin: 4px 0;"> Phần đầu trắc nghiệm nhiều lựa chọn này ghi chữ &nbsp;<code><b> G1 </b></code></p>
@@ -689,8 +690,10 @@ Câu 1. Chu vi hình tròn bằng bao nhiêu nếu biết bán kính = 2 và Pi 
 #12,6
 Câu 2. ...........</pre>
                         </div>
-                        <div style="background: #f0f7ff; border-left: 4px solid #0b3c6d; padding: 10px; border-radius: 4px;">
-                            <b style="color: #0b3c6d;">QUY TRÌNH 5 BƯỚC TỔ CHỨC CA THI:</b>
+
+                        <!-- KHỐI 2: QUY TRÌNH 5 BƯỚC (NỀN VÀ THANH VIỀN ĐỒNG BỘ GIỐNG PHÍA TRÊN) -->
+                        <div style="background: #fff8e6; border-left: 4px solid #d97706; padding: 10px; border-radius: 4px;">
+                            <b style="color: #b45309;">QUY TRÌNH 5 BƯỚC TỔ CHỨC CA THI:</b>
                             <ol style="margin: 6px 0 0 16px; padding: 0;">
                                 <li><b>Bước 1:</b> Bấm <b>Import ngân hàng đề</b> để nạp file Word (<code>.docx</code>). Số câu trong ngân hàng đề có thể nhiều hơn hoặc bằng số câu muốn tạo đề kiểm tra.</li>
                                 <li><b>Bước 2:</b> Bấm <b>AI tạo đề kiểm tra</b> để cấu hình: Lớp, số lượng câu, thang điểm và thời gian làm bài.</li>
@@ -706,6 +709,7 @@ Câu 2. ...........</pre>
                 confirmButtonColor: '#0b3c6d'
             });
         }
+        
         socket.on('update_teacher_list', (students) => {
             document.getElementById('onlineCount').innerText = students.length;
             const tbody = document.getElementById('studentTableBody');
