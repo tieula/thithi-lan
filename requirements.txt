@@ -4,3 +4,4 @@ eventlet
 openpyxl
 gunicorn
 python-docx
+cloudinary
