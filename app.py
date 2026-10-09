@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 import cloudinary
 import cloudinary.uploader
 from docx import Document
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, redirect
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -118,7 +118,6 @@ def extract_docx_with_cloudinary(docx_path):
             return paragraphs
     except Exception as e:
         print(f"Lỗi bóc tách docx bằng zipfile: {e}")
-        # Phương án dự phòng (fallback về Document của python-docx nếu lỗi zip)
         doc = Document(docx_path)
         paragraphs = []
         for p in doc.paragraphs:
@@ -552,13 +551,25 @@ def teacher_dashboard():
 def student_view():
     return render_template('student.html')
 
+# ROUTE RÚT GỌN LINK CHO HỌC SINH (/r/mã_phòng)
+@app.route('/r/<room_id>')
+def short_room(room_id):
+    return redirect(f"/student?room={room_id}")
+
+# ROUTE SIÊU NHẸ ĐỂ PING CHỐNG NGỦ ĐÔNG
+@app.route('/ping')
+def ping():
+    return "pong", 200
+
 @app.route('/api/get_ip', methods=['GET'])
 def api_get_ip():
     room_id = request.args.get('room', '')
     base_url = get_base_url()
-    url = f"{base_url}/student"
+    # Mặc định trả về link ngắn /r/room_id
     if room_id:
-        url += f"?room={room_id}"
+        url = f"{base_url}/r/{room_id}"
+    else:
+        url = f"{base_url}/student"
     return jsonify({
         "ip": base_url.replace("http://", "").replace("https://", "").split(":")[0],
         "port": 5000,
@@ -578,7 +589,6 @@ def upload_bank():
     save_path = os.path.join(UPLOAD_DIR, f"{room_id}_{filename}")
     file.save(save_path)
 
-    # Sử dụng hàm giải nén zipfile để bóc toàn bộ ảnh lên Cloudinary
     paragraphs = extract_docx_with_cloudinary(save_path)
 
     mcq_questions = []
