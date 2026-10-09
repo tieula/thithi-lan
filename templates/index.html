@@ -36,9 +36,56 @@
             border-color: #0b3c6d !important;
             color: #0b3c6d !important;
         }
+
+        /* ĐỒNG HỒ ĐẾM NGƯỢC GÓC TRÊN BÊN PHẢI */
+        .teacher-timer-fixed {
+            position: fixed;
+            top: 14px;
+            right: 18px;
+            z-index: 99999;
+            background: linear-gradient(135deg, #0b3c6d, #145388);
+            color: #ffffff;
+            padding: 6px 16px;
+            border-radius: 10px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            text-align: center;
+            user-select: none;
+            transition: all 0.3s ease;
+        }
+        .teacher-timer-fixed .timer-title {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            opacity: 0.9;
+            text-transform: uppercase;
+        }
+        .teacher-timer-fixed .timer-digits {
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: #ffffff;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+            font-variant-numeric: tabular-nums;
+        }
+        .teacher-timer-fixed.time-warning {
+            background: linear-gradient(135deg, #dc2626, #991b1b) !important;
+            border-color: #fca5a5 !important;
+            animation: timer-pulse 1s infinite alternate;
+        }
+        @keyframes timer-pulse {
+            from { transform: scale(1); box-shadow: 0 0 10px rgba(220, 38, 38, 0.6); }
+            to { transform: scale(1.04); box-shadow: 0 0 20px rgba(220, 38, 38, 0.9); }
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col justify-between antialiased">
+
+    <!-- ĐỒNG HỒ ĐẾM NGƯỢC GÓC TRÊN BÊN PHẢI -->
+    <div id="teacher-timer-box" class="teacher-timer-fixed">
+        <div class="timer-title">THỜI GIAN CÒN LẠI</div>
+        <div id="teacher-timer-display" class="timer-digits">00:00:00</div>
+    </div>
 
     <div class="w-full max-w-5xl mx-auto p-4 flex-1">
         <!-- HEADER -->
@@ -105,7 +152,6 @@
 
         <!-- 3 NÚT DƯỚI CÙNG -->
         <div class="flex justify-end gap-2 mt-4">
-            <!-- NÚT HƯỚNG DẪN SỬ DỤNG (THEME NAVY SÀNH ĐIỆU) -->
             <button onclick="showGuideModal()" class="bg-[#0B5082] hover:bg-[#083b61] text-white font-semibold py-1.5 px-3 rounded shadow text-xs flex items-center gap-1.5 transition cursor-pointer border border-sky-600">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -255,6 +301,29 @@
     <script>
         const socket = io();
         let examCountdownTimer = null;
+        let teacherSecondsLeft = 0;
+
+        function formatTeacherTime(totalSecs) {
+            totalSecs = Math.max(0, Math.floor(totalSecs));
+            const h = Math.floor(totalSecs / 3600);
+            const m = Math.floor((totalSecs % 3600) / 60);
+            const s = totalSecs % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        function updateTeacherTimerDisplay() {
+            const displayEl = document.getElementById('teacher-timer-display');
+            const boxEl = document.getElementById('teacher-timer-box');
+            if (!displayEl || !boxEl) return;
+
+            displayEl.textContent = formatTeacherTime(teacherSecondsLeft);
+
+            if (teacherSecondsLeft <= 60 && teacherSecondsLeft > 0) {
+                boxEl.classList.add('time-warning');
+            } else {
+                boxEl.classList.remove('time-warning');
+            }
+        }
 
         // TỰ ĐỘNG CẤP HOẶC TÁI SỬ DỤNG MÃ PHÒNG (ROOM PIN 6 CHỮ SỐ)
         let currentRoom = sessionStorage.getItem('current_room_id');
@@ -344,6 +413,7 @@
                     qrContainer.innerHTML = "";
                     const parentBox = qrContainer.parentElement;
                     const size = Math.min(parentBox.clientWidth, parentBox.clientHeight) - 16;
+
                     new QRCode(qrContainer, {
                         text: fallbackUrl,
                         width: size,
@@ -437,6 +507,11 @@
                 document.getElementById('displayNumTf').innerText = payload.num_tf;
                 document.getElementById('displayNumSa').innerText = payload.num_sa;
                 document.getElementById('displayDuration').innerText = payload.duration;
+                
+                // Cập nhật sẵn thời lượng lên đồng hồ trước khi bấm Bắt đầu
+                teacherSecondsLeft = payload.duration * 60;
+                updateTeacherTimerDisplay();
+
                 closeSubform();
                 
                 Swal.fire({
@@ -478,14 +553,18 @@
             });
 
             const durationMinutes = parseInt(document.getElementById('displayDuration').innerText) || 15;
-            let totalSeconds = durationMinutes * 60;
+            teacherSecondsLeft = durationMinutes * 60;
+            updateTeacherTimerDisplay();
 
             if (examCountdownTimer) clearInterval(examCountdownTimer);
 
             examCountdownTimer = setInterval(() => {
-                totalSeconds--;
-                if (totalSeconds <= 0) {
+                if (teacherSecondsLeft > 0) {
+                    teacherSecondsLeft--;
+                    updateTeacherTimerDisplay();
+                } else {
                     clearInterval(examCountdownTimer);
+                    updateTeacherTimerDisplay();
                     btn.innerText = "Hết giờ làm bài";
                     
                     Swal.fire({
@@ -515,7 +594,6 @@
                 }
             });
 
-            // Tự động tải file nén kết quả của đúng phòng này
             window.location.href = `/api/download_all_results?room=${currentRoom}`;
 
             setTimeout(() => {
@@ -543,7 +621,7 @@
             }).then((result) => {
                 if (result.isConfirmed) {
                     fetch('/api/reset_exam', { 
-                        method: 'POST',
+                        method: 'POST', 
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ room: currentRoom })
                     }).finally(() => {
@@ -617,8 +695,8 @@ Câu 2. ...........</pre>
 Câu 1. Chu vi hình tròn bằng bao nhiêu nếu biết bán kính = 2 và Pi = 3.1416 (làm tròn kết quả đến chữ số hàng phần mười) 
 #12,6
 Câu 2. ...........</pre>
-</div>
-<div style="background: #f0f7ff; border-left: 4px solid #0b3c6d; padding: 10px; margin-bottom: 12px; border-radius: 4px;">
+                        </div>
+                        <div style="background: #f0f7ff; border-left: 4px solid #0b3c6d; padding: 10px; margin-bottom: 12px; border-radius: 4px;">
                             <b style="color: #0b3c6d;">QUY TRÌNH 5 BƯỚC TỔ CHỨC CA THI:</b>
                             <ol style="margin: 6px 0 0 16px; padding: 0;">
                                 <li><b>Bước 1:</b> Bấm <b>Import ngân hàng đề</b> để nạp file Word (<code>.docx</code>). Số câu trong ngân hàng đề có thể nhiều hơn hoặc bằng số câu muốn tạo đề kiểm tra.</li>
