@@ -9,6 +9,8 @@ import random
 import copy
 import zipfile
 from io import BytesIO
+import xml.etree.ElementTree as ET
+
 import cloudinary
 import cloudinary.uploader
 from docx import Document
@@ -18,7 +20,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-# Cấu hình Cloudinary
+# --- CẤU HÌNH CLOUDINARY ---
 cloudinary.config(
     cloud_name = "y0xsqdev",
     api_key = "974245233197575",
@@ -26,35 +28,105 @@ cloudinary.config(
     secure = True
 )
 
-def upload_image_to_cloudinary(image_bytes):
-    """Đẩy luồng byte của ảnh lên Cloudinary và trả về đường link web tối ưu"""
+def upload_bytes_to_cloudinary(image_bytes, filename="image.png"):
+    """Tải trực tiếp byte ảnh lên Cloudinary và trả về URL ảnh đã tối ưu"""
     try:
         res = cloudinary.uploader.upload(
             image_bytes,
             folder="thithi_lan",
             transformation=[{'quality': 'auto', 'fetch_format': 'auto'}]
         )
-        return res.get('secure_url')
+        return res.get('secure_url', '')
     except Exception as e:
-        print(f"Lỗi tải ảnh lên Cloudinary: {e}")
+        print(f"Lỗi tải ảnh Cloudinary ({filename}): {e}")
         return ""
 
-def extract_paragraph_content(p, doc):
-    """Trích xuất cả chữ và hình ảnh trong 1 paragraph của Word"""
-    text_content = ""
-    for r in p.runs:
-        text_content += r.text
-        # Quét các thẻ đồ họa nhúng trong run
-        blips = r._r.xpath('.//a:blip')
-        for blip in blips:
-            rId = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
-            if rId and rId in doc.part.rels:
-                image_part = doc.part.rels[rId].target_ref
-                image_data = doc.part.related_parts[image_part].blob
-                cloud_url = upload_image_to_cloudinary(image_data)
-                if cloud_url:
-                    text_content += f'<br><img src="{cloud_url}" class="exam-img" style="max-width:100%; height:auto; margin:8px 0; display:block;" /><br>'
-    return text_content
+def extract_docx_with_cloudinary(docx_path):
+    """
+    Bóc tách toàn bộ văn bản và ảnh từ file Word .docx một cách tuyệt đối:
+    1. Đọc word/media/ bằng zipfile để đẩy toàn bộ ảnh lên Cloudinary.
+    2. Đọc word/_rels/document.xml.rels để ánh xạ rId sang tên ảnh.
+    3. Đọc tuần tự từng paragraph trong word/document.xml để chèn đúng vị trí ảnh.
+    """
+    try:
+        with zipfile.ZipFile(docx_path, 'r') as zf:
+            file_list = zf.namelist()
+
+            # 1. Tải toàn bộ ảnh trong word/media/ lên Cloudinary
+            media_urls = {} # media_filename -> cloudinary_url
+            for fname in file_list:
+                if fname.startswith('word/media/'):
+                    short_name = os.path.basename(fname)
+                    img_data = zf.read(fname)
+                    c_url = upload_bytes_to_cloudinary(img_data, short_name)
+                    if c_url:
+                        media_urls[short_name] = c_url
+
+            # 2. Đọc quan hệ rId trong document.xml.rels
+            rel_to_url = {} # rId -> cloudinary_url
+            rels_path = 'word/_rels/document.xml.rels'
+            if rels_path in file_list and media_urls:
+                rels_xml = zf.read(rels_path)
+                root_rels = ET.fromstring(rels_xml)
+                for rel in root_rels:
+                    r_id = rel.get('Id')
+                    target = rel.get('Target', '')
+                    target_name = os.path.basename(target)
+                    if target_name in media_urls:
+                        rel_to_url[r_id] = media_urls[target_name]
+
+            # 3. Phân tích nội dung tuần tự từ document.xml
+            doc_xml = zf.read('word/document.xml')
+            root_doc = ET.fromstring(doc_xml)
+
+            # Các namespace chuẩn của file OpenXML Word
+            ns = {
+                'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+                'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+                'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+                'v': 'urn:schemas-microsoft-com:vml'
+            }
+
+            paragraphs = []
+            for p in root_doc.findall('.//w:p', ns):
+                p_text_parts = []
+                for elem in p.iter():
+                    tag = elem.tag
+                    # Thẻ chứa chữ
+                    if tag == f"{{{ns['w']}}}t" and elem.text:
+                        p_text_parts.append(elem.text)
+                    # Thẻ chứa ảnh (DrawingML blip)
+                    elif tag == f"{{{ns['a']}}}blip":
+                        embed_id = elem.get(f"{{{ns['r']}}}embed")
+                        if embed_id and embed_id in rel_to_url:
+                            img_link = rel_to_url[embed_id]
+                            p_text_parts.append(f'<br><img src="{img_link}" class="exam-img" style="max-width:100%; height:auto; margin:8px 0; display:block;" /><br>')
+                    # Thẻ chứa ảnh dạng VML (ảnh cũ hoặc copy từ trình duyệt)
+                    elif tag == f"{{{ns['v']}}}imagedata":
+                        rel_id = elem.get(f"{{{ns['r']}}}id")
+                        if rel_id and rel_id in rel_to_url:
+                            img_link = rel_to_url[rel_id]
+                            p_text_parts.append(f'<br><img src="{img_link}" class="exam-img" style="max-width:100%; height:auto; margin:8px 0; display:block;" /><br>')
+
+                p_full = "".join(p_text_parts).strip()
+                if p_full:
+                    for sub in p_full.split('\n'):
+                        s = sub.strip()
+                        if s:
+                            paragraphs.append(s)
+
+            return paragraphs
+    except Exception as e:
+        print(f"Lỗi bóc tách docx bằng zipfile: {e}")
+        # Phương án dự phòng (fallback về Document của python-docx nếu lỗi zip)
+        doc = Document(docx_path)
+        paragraphs = []
+        for p in doc.paragraphs:
+            for sub in p.text.split('\n'):
+                s = sub.strip()
+                if s:
+                    paragraphs.append(s)
+        return paragraphs
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'lan_exam_secret_key_2026'
@@ -177,7 +249,7 @@ def generate_individual_exam(room_data):
     random.shuffle(selected_tf_raw)
     random.shuffle(selected_sa_raw)
 
-    # 1. Trắc nghiệm nhiều lựa chọn (G1)
+    # 1. Trắc nghiệm (G1)
     mcq_send, mcq_server = [], []
     labels = ['A', 'B', 'C', 'D']
     for idx, q in enumerate(selected_mcq_raw, 1):
@@ -506,18 +578,8 @@ def upload_bank():
     save_path = os.path.join(UPLOAD_DIR, f"{room_id}_{filename}")
     file.save(save_path)
 
-    try:
-        doc = Document(save_path)
-    except Exception as e:
-        return jsonify({"success": False, "error": f"Lỗi đọc file: {str(e)}"})
-
-    paragraphs = []
-    for p in doc.paragraphs:
-        content = extract_paragraph_content(p, doc)
-        for sub in content.split('\n'):
-            s = sub.strip()
-            if s:
-                paragraphs.append(s)
+    # Sử dụng hàm giải nén zipfile để bóc toàn bộ ảnh lên Cloudinary
+    paragraphs = extract_docx_with_cloudinary(save_path)
 
     mcq_questions = []
     tf_questions = []
